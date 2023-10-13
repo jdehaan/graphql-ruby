@@ -19,7 +19,7 @@
           </a>
           <a href="/getting_started">Get Started</a>
           <a href="/guides">Guides</a>
-          <a href="/api-doc/1.13.1/">API</a>
+          <a href="/api-doc/2.1.3/">API</a>
           <a href="https://tinyletter.com/graphql-ruby">Newsletter</a>
           <a href="https://github.com/rmosolgo/graphql-ruby">Source Code</a>
           <a href="https://graphql.pro">Upgrade to Pro</a>
@@ -37,16 +37,101 @@
       </div>
     </div>
     <div class="container">
-      <p class="breadcrumb">
-  <a href="/">GraphQL</a>
-  &raquo; <a href="/guides">Guides</a>
-   &raquo; <a href="/guides#schema-guides">Schema</a>
-  &raquo; Dynamic types and fields
-</p>
+      <ul class="breadcrumb">
+  <li><a href="/guides">Guides</a></li>
+  <li>
+    <select class="jump-to-select" onchange="navigateToSelected(this)">
+      
+        <option  selected data-target="/schema/definition.html">Schema</option>
+      
+        <option  data-target="/queries/executing_queries.html">Queries</option>
+      
+        <option  data-target="/type_definitions/objects.html">Type Definitions</option>
+      
+        <option  data-target="/authorization/overview.html">Authorization</option>
+      
+        <option  data-target="/fields/introduction.html">Fields</option>
+      
+        <option  data-target="/mutations/mutation_root.html">Mutations</option>
+      
+        <option  data-target="/errors/overview.html">Errors</option>
+      
+        <option  data-target="/pagination/overview.html">Pagination</option>
+      
+        <option  data-target="/relay/range_add.html">Relay</option>
+      
+        <option  data-target="/dataloader/overview.html">Dataloader</option>
+      
+        <option  data-target="/subscriptions/overview.html">Subscriptions</option>
+      
+        <option  data-target="/pro/home.html">GraphQL Pro</option>
+      
+        <option  data-target="/operation_store/overview.html">GraphQL Pro - OperationStore</option>
+      
+        <option  data-target="/defer/overview.html">GraphQL Pro - Defer</option>
+      
+        <option  data-target="/limiters/overview.html">GraphQL Enterprise - Rate Limiters</option>
+      
+        <option  data-target="/object_cache/overview.html">GraphQL Enterprise - Object Cache</option>
+      
+        <option  data-target="/changesets/overview.html">GraphQL Enterprise - Changesets</option>
+      
+        <option  data-target="/javascript_client/overview.html">JavaScript Client</option>
+      
+        <option  data-target="/language_tools/visitor.html">Language Tools</option>
+      
+        <option  data-target="/testing/overview.html">Testing</option>
+      
+        <option  data-target="/development.html">Other</option>
+      
+    </select>
+  </li>
+  <li>
+    <select class="jump-to-select" onchange="navigateToSelected(this)">
+      
+        <option  data-target="/schema/definition.html">Definition</option>
+      
+        <option  data-target="/schema/root_types.html">Root Types</option>
+      
+        <option  data-target="/schema/generators.html">Generators</option>
+      
+        <option  data-target="/schema/introspection.html">Introspection</option>
+      
+        <option  data-target="/schema/lazy_execution.html">Lazy Execution</option>
+      
+        <option  data-target="/schema/sdl.html">Parsing GraphQL Schema Definition Language into a Ruby Schema</option>
+      
+        <option  selected data-target="/schema/dynamic_types.html">Dynamic types and fields</option>
+      
+        <option  data-target="/schema/object_identification.html">Object Identification</option>
+      
+    </select>
+  </li>
+</ul>
 
 
 
 <h1 class="guide-header">Dynamic types and fields</h1>
+<div class="guide-table-of-contents"><div class="table-of-contents">
+  <h3 class="contents-header">Contents</h3>
+  <ol class='contents-list'><li class='contents-entry'><a href='#different-fields'>Different fields
+</a><ol class='contents-list'><li class='contents-entry'><a href='#using-visible-context'>Using <code>#visible?(context)</code>
+</a></li><li class='contents-entry'><a href='#using-fields-context-and-get_field-name-context'>Using <code>.fields(context)</code> and <code>.get_field(name, context)</code>
+</a></li><li class='contents-entry'><a href='#hidden-return-types'>Hidden Return Types
+</a></li></ol></li><li class='contents-entry'><a href='#different-arguments'>Different arguments
+</a><ol class='contents-list'><li class='contents-entry'><a href='#using-visible-context'>Using <code>#visible?(context)</code>
+</a></li><li class='contents-entry'><a href='#using-def-arguments-context-and-def-get_argument-name-context'>Using <code>def arguments(context)</code> and <code>def get_argument(name, context)</code>
+</a></li><li class='contents-entry'><a href='#hidden-input-types'>Hidden Input Types
+</a></li></ol></li><li class='contents-entry'><a href='#different-enum-values'>Different enum values
+</a><ol class='contents-list'><li class='contents-entry'><a href='#using-visible-context'>Using <code>#visible?(context)</code>
+</a></li><li class='contents-entry'><a href='#using-enum_values-context'>Using <code>.enum_values(context)</code>
+</a></li></ol></li><li class='contents-entry'><a href='#different-types'>Different types
+</a><ol class='contents-list'><li class='contents-entry'><a href='#using-visible-context'>Using <code>.visible?(context)</code>
+</a></li><li class='contents-entry'><a href='#different-definitions-for-the-same-type'>Different definitions for the same type
+</a></li></ol></li><li class='contents-entry'><a href='#schema-dumps'>Schema Dumps
+</a></li></ol>
+</div>
+</div>
 <div class="guide-container">
   <p>You can use different versions of your GraphQL schema for each operation. To do this, implement <code class="language-plaintext highlighter-rouge">visible?(context)</code> on the parts of your schema that will be conditionally accessible. Additionally, many schema elements have definition methods which are called at runtime by GraphQL-Ruby. You can re-implement those to return any valid schema objects. GraphQL-Ruby caches schema elements for the duration of the operation, but if you’re making external service calls to implement the methods below, consider adding a cache layer to improve the client experience and reduce load on your backend.</p>
 
@@ -54,11 +139,11 @@
 
 <p>When using dynamic schema members, be sure to include the relevant <code class="language-plaintext highlighter-rouge">context: ...</code> when <a href="#schema-dumps">generating schema definition files</a>.</p>
 
-<h3 id="different-fields">Different fields</h3>
+<h2 id="different-fields">Different fields</h2>
 
 <p>You can customize which field definitions are used for each operation.</p>
 
-<h4 id="using-visiblecontext">Using <code class="language-plaintext highlighter-rouge">#visible?(context)</code></h4>
+<h3 id="using-visiblecontext">Using <code class="language-plaintext highlighter-rouge">#visible?(context)</code></h3>
 
 <p>To serve different fields to different clients, implement <code class="language-plaintext highlighter-rouge">def visible?(context)</code> in your <a href="/type_definitions/extensions#customizing-fields">base field class</a>:</p>
 
@@ -96,9 +181,11 @@
 
 <p>With that configuration, <code class="language-plaintext highlighter-rouge">post { comments { ... } }</code> will use <code class="language-plaintext highlighter-rouge">def moderated_comments</code> when <code class="language-plaintext highlighter-rouge">context[:current_user]</code> is <code class="language-plaintext highlighter-rouge">nil</code> or is not <code class="language-plaintext highlighter-rouge">.staff?</code>, but when <code class="language-plaintext highlighter-rouge">context[:current_user].staff?</code> is <code class="language-plaintext highlighter-rouge">true</code>, it will use <code class="language-plaintext highlighter-rouge">def all_comments</code> instead.</p>
 
-<h4 id="using-fieldscontext">Using <code class="language-plaintext highlighter-rouge">.fields(context)</code></h4>
+<h3 id="using-fieldscontext-and-get_fieldname-context">Using <code class="language-plaintext highlighter-rouge">.fields(context)</code> and <code class="language-plaintext highlighter-rouge">.get_field(name, context)</code></h3>
 
-<p>To customize the set of fields used at runtime, you can implement <code class="language-plaintext highlighter-rouge">def self.fields(context)</code> in your type classes, for example:</p>
+<p>To customize the set of fields used at runtime, you can implement <code class="language-plaintext highlighter-rouge">def self.fields(context)</code> in your type classes. It should return a Hash of <code class="language-plaintext highlighter-rouge">{ String =&gt; GraphQL::Schema::Field }</code>.</p>
+
+<p>Along with this, you should implement <code class="language-plaintext highlighter-rouge">.get_field(name, context)</code> to return a field for <code class="language-plaintext highlighter-rouge">name</code>, if it should exist. For example:</p>
 
 <div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">Types::User</span> <span class="o">&lt;</span> <span class="no">Types</span><span class="o">::</span><span class="no">BaseObject</span>
   <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">fields</span><span class="p">(</span><span class="n">context</span><span class="p">)</span>
@@ -108,20 +195,27 @@
     <span class="k">end</span>
     <span class="n">all_fields</span>
   <span class="k">end</span>
+
+  <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">get_field</span><span class="p">(</span><span class="nb">name</span><span class="p">,</span> <span class="n">context</span><span class="p">)</span>
+    <span class="n">field</span> <span class="o">=</span> <span class="k">super</span>
+    <span class="k">if</span> <span class="n">field</span><span class="p">.</span><span class="nf">graphql_name</span> <span class="o">==</span> <span class="s2">"isSpammy"</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">context</span><span class="p">[</span><span class="ss">:current_user</span><span class="p">]</span><span class="o">&amp;</span><span class="p">.</span><span class="nf">staff?</span>
+      <span class="kp">nil</span> <span class="c1"># don't show this field to non-staff</span>
+    <span class="k">else</span>
+      <span class="n">field</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
 <span class="k">end</span>
 </code></pre></div></div>
 
-<p>It should return a Hash of <code class="language-plaintext highlighter-rouge">{ String =&gt; GraphQL::Schema::Field }</code>.</p>
-
-<h4 id="hidden-return-types">Hidden Return Types</h4>
+<h3 id="hidden-return-types">Hidden Return Types</h3>
 
 <p>Besides field visibility described above, if an field’s return type is hidden (that is, it implements <code class="language-plaintext highlighter-rouge">self.visible?(context)</code> to return <code class="language-plaintext highlighter-rouge">false</code>), then the field will be hidden too.</p>
 
-<h3 id="different-arguments">Different arguments</h3>
+<h2 id="different-arguments">Different arguments</h2>
 
 <p>As with fields, you can use different sets of argument definitions for different GraphQL operations.</p>
 
-<h4 id="using-visiblecontext-1">Using <code class="language-plaintext highlighter-rouge">#visible?(context)</code></h4>
+<h3 id="using-visiblecontext-1">Using <code class="language-plaintext highlighter-rouge">#visible?(context)</code></h3>
 
 <p>To serve different arguments to different clients, implement <code class="language-plaintext highlighter-rouge">def visible?(context)</code> in your <a href="/type_definitions/extensions#customizing-arguments">base argument class</a>:</p>
 
@@ -161,17 +255,17 @@
 
 <p>That way, any staff client will have the option of <code class="language-plaintext highlighter-rouge">id</code> or <code class="language-plaintext highlighter-rouge">databaseId</code> while non-staff clients must use <code class="language-plaintext highlighter-rouge">id</code>.</p>
 
-<h4 id="using-def-argumentscontext">Using <code class="language-plaintext highlighter-rouge">def arguments(context)</code></h4>
+<h3 id="using-def-argumentscontext-and-def-get_argumentname-context">Using <code class="language-plaintext highlighter-rouge">def arguments(context)</code> and <code class="language-plaintext highlighter-rouge">def get_argument(name, context)</code></h3>
 
-<p>Also, you can implement <code class="language-plaintext highlighter-rouge">def arguments(context)</code> on your base field class to return a Hash of <code class="language-plaintext highlighter-rouge">{ String =&gt; GraphQL::Schema::Argument }</code>. If you take this approach, you might want some custom field classes for any types or resolvers that use <code class="language-plaintext highlighter-rouge">def arguments(context)</code>. That way, you don’t have to reimplement the method for <em>all</em> the fields in the schema.</p>
+<p>Also, you can implement <code class="language-plaintext highlighter-rouge">def arguments(context)</code> on your base field class to return a Hash of <code class="language-plaintext highlighter-rouge">{ String =&gt; GraphQL::Schema::Argument }</code> and <code class="language-plaintext highlighter-rouge">def get_argument(name, context)</code> to return a <a href="/api-doc/2.1.3/GraphQL/Schema/Argument" target="_blank" title="API docs for GraphQL::Schema::Argument"><code>GraphQL::Schema::Argument</code></a> or <code class="language-plaintext highlighter-rouge">nil</code>. . If you take this approach, you might want some custom field classes for any types or resolvers that use these methods. That way, you don’t have to reimplement the method for <em>all</em> the fields in the schema.</p>
 
-<h4 id="hidden-input-types">Hidden Input Types</h4>
+<h3 id="hidden-input-types">Hidden Input Types</h3>
 
 <p>Besides argument visibility described above, if an argument’s input type is hidden (that is, it implements <code class="language-plaintext highlighter-rouge">self.visible?(context)</code> to return <code class="language-plaintext highlighter-rouge">false</code>), then the argument will be hidden too.</p>
 
-<h3 id="different-enum-values">Different enum values</h3>
+<h2 id="different-enum-values">Different enum values</h2>
 
-<h4 id="using-visiblecontext-2">Using <code class="language-plaintext highlighter-rouge">#visible?(context)</code></h4>
+<h3 id="using-visiblecontext-2">Using <code class="language-plaintext highlighter-rouge">#visible?(context)</code></h3>
 
 <p>You can implement <code class="language-plaintext highlighter-rouge">def visible?(context)</code> in your <a href="/type_definitions/extensions#customizing-enum-values">base enum value class</a> to hide some enum values from some clients. For example:</p>
 
@@ -208,9 +302,9 @@
 <span class="k">end</span>
 </code></pre></div></div>
 
-<h4 id="using-enum_valuescontext">Using <code class="language-plaintext highlighter-rouge">.enum_values(context)</code></h4>
+<h3 id="using-enum_valuescontext">Using <code class="language-plaintext highlighter-rouge">.enum_values(context)</code></h3>
 
-<p>Alternatively, you can implement <code class="language-plaintext highlighter-rouge">def self.enum_values(context)</code> in your enum types to return an Array of <a href="/api-doc/1.13.1/GraphQL/Schema/EnumValue" target="_blank" title="API docs for GraphQL::Schema::EnumValue"><code>GraphQL::Schema::EnumValue</code></a>s. For example, to return a dynamic set of enum values:</p>
+<p>Alternatively, you can implement <code class="language-plaintext highlighter-rouge">def self.enum_values(context)</code> in your enum types to return an Array of <a href="/api-doc/2.1.3/GraphQL/Schema/EnumValue" target="_blank" title="API docs for GraphQL::Schema::EnumValue"><code>GraphQL::Schema::EnumValue</code></a>s. For example, to return a dynamic set of enum values:</p>
 
 <div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">ProjectStatus</span> <span class="o">&lt;</span> <span class="no">Types</span><span class="o">::</span><span class="no">BaseEnum</span>
   <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">enum_values</span><span class="p">(</span><span class="n">context</span> <span class="o">=</span> <span class="p">{})</span>
@@ -226,7 +320,7 @@
 <span class="k">end</span>
 </code></pre></div></div>
 
-<h3 id="different-types">Different types</h3>
+<h2 id="different-types">Different types</h2>
 
 <p>You can also use different types for each query. A few behaviors depend on the methods defined above:</p>
 
@@ -239,7 +333,7 @@
 
 <p>As you can imagine, these different hiding behaviors influence one another and they can cause some real head-scratchers when used simultaneously.</p>
 
-<h4 id="using-visiblecontext-3">Using <code class="language-plaintext highlighter-rouge">.visible?(context)</code></h4>
+<h3 id="using-visiblecontext-3">Using <code class="language-plaintext highlighter-rouge">.visible?(context)</code></h3>
 
 <p>Type classes can implement <code class="language-plaintext highlighter-rouge">def self.visible?(context)</code> to hide themselves at runtime:</p>
 
@@ -254,7 +348,7 @@
 <span class="k">end</span>
 </code></pre></div></div>
 
-<h4 id="different-definitions-for-the-same-type">Different definitions for the same type</h4>
+<h3 id="different-definitions-for-the-same-type">Different definitions for the same type</h3>
 
 <p>You can provide different implementations of the same type by:</p>
 
@@ -316,9 +410,9 @@
 
 <p>Input types (like input objects, scalars, and enums) work the same way with argument definitions.</p>
 
-<h3 id="schema-dumps">Schema Dumps</h3>
+<h2 id="schema-dumps">Schema Dumps</h2>
 
-<p>To dump a certain <em>version</em> of the schema, provide the applicable <code class="language-plaintext highlighter-rouge">context: ...</code> to <a href="/api-doc/1.13.1/GraphQL/Schema#to_definition-class_method" target="_blank" title="API docs for GraphQL::Schema.to_definition"><code>Schema.to_definition</code></a>. For example:</p>
+<p>To dump a certain <em>version</em> of the schema, provide the applicable <code class="language-plaintext highlighter-rouge">context: ...</code> to <a href="/api-doc/2.1.3/GraphQL/Schema#to_definition-class_method" target="_blank" title="API docs for GraphQL::Schema.to_definition"><code>Schema.to_definition</code></a>. For example:</p>
 
 <div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Legacy money schema:</span>
 <span class="no">MySchema</span><span class="p">.</span><span class="nf">to_definition</span><span class="p">(</span><span class="ss">context: </span><span class="p">{</span> <span class="ss">requests_legacy_money: </span><span class="kp">true</span> <span class="p">})</span>
@@ -353,6 +447,10 @@
       header.textContent = "";
       header.appendChild(headerLink);
     }
+  }
+  function navigateToSelected(selectElement) {
+    var nextPage = selectElement.selectedOptions[0].dataset["target"]
+    document.location = nextPage
   }
 </script>
 
