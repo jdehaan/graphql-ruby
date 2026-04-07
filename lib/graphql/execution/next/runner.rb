@@ -15,7 +15,7 @@ module GraphQL
 
           @runtime_directives = nil
           @schema.directives.each do |name, dir_class|
-            if dir_class.runtime? && name != "if" && name != "skip"
+            if dir_class.runtime? && name != "include" && name != "skip"
               @runtime_directives ||= {}
               @runtime_directives[dir_class.graphql_name] = dir_class
             end
@@ -86,91 +86,103 @@ module GraphQL
                 next
               end
 
-              selected_operation = query.document.definitions.first # TODO select named operation
+              selected_operation = query.selected_operation
+              root_type = query.root_type
               data = {}
 
-              root_type = case selected_operation.operation_type
-              when nil, "query"
-                @schema.query
-              when "mutation"
-                @schema.mutation
-              when "subscription"
-                @schema.subscription
-              else
-                raise ArgumentError, "Unknown operation type: #{selected_operation.operation_type.inspect}"
-              end
+              beginning_path = EmptyObjects::EMPTY_ARRAY
 
-              if self.authorization && authorizes?(root_type, query.context)
-                query.current_trace.begin_authorized(root_type, query.root_value, query.context)
-                auth_check = schema.sync_lazy(root_type.authorized?(query.root_value, query.context))
-                query.current_trace.end_authorized(root_type, query.root_value, query.context, auth_check)
-                root_value = if auth_check
-                  query.root_value
-                else
-                  begin
-                    auth_err = GraphQL::UnauthorizedError.new(object: query.root_value, type: root_type, context: query.context)
-                    new_val = schema.unauthorized_object(auth_err)
-                    if new_val
-                      auth_check = true
+              case root_type.kind.name
+              when "OBJECT"
+                if self.authorization && authorizes?(root_type, query.context)
+                  query.current_trace.begin_authorized(root_type, query.root_value, query.context)
+                  auth_check = schema.sync_lazy(root_type.authorized?(query.root_value, query.context))
+                  query.current_trace.end_authorized(root_type, query.root_value, query.context, auth_check)
+                  root_value = if auth_check
+                    query.root_value
+                  else
+                    begin
+                      auth_err = GraphQL::UnauthorizedError.new(object: query.root_value, type: root_type, context: query.context)
+                      new_val = schema.unauthorized_object(auth_err)
+                      if new_val
+                        auth_check = true
+                      end
+                      new_val
+                    rescue GraphQL::ExecutionError => ex_err
+                      # The old runtime didn't add path and ast_nodes to this
+                      query.context.add_error(ex_err)
+                      nil
                     end
-                    new_val
-                  rescue GraphQL::ExecutionError => ex_err
-                    # The old runtime didn't add path and ast_nodes to this
-                    query.context.add_error(ex_err)
-                    nil
                   end
+
+                  if !auth_check
+                    results << {}
+                    next
+                  end
+                else
+                  root_value = query.root_value
                 end
 
-                if !auth_check
-                  results << {}
-                  next
-                end
-              else
-                root_value = query.root_value
-              end
+                results << { "data" => data }
 
-              results << { "data" => data }
-
-              case selected_operation.operation_type
-              when nil, "query"
-                isolated_steps[0] << SelectionsStep.new(
-                  parent_type: root_type,
-                  selections: selected_operation.selections,
-                  objects: [root_value],
-                  results: [data],
-                  path: EmptyObjects::EMPTY_ARRAY,
-                  runner: self,
-                  query: query,
-                )
-              when "mutation"
-                fields = {}
-                gather_selections(root_type, selected_operation.selections, nil, query, {}, into: fields)
-                fields.each_value do |field_resolve_step|
-                  isolated_steps << [SelectionsStep.new(
+                if query.query?
+                  isolated_steps[0] << SelectionsStep.new(
                     parent_type: root_type,
-                    selections: field_resolve_step.ast_nodes || Array(field_resolve_step.ast_node),
+                    selections: selected_operation.selections,
                     objects: [root_value],
                     results: [data],
-                    path: EmptyObjects::EMPTY_ARRAY,
+                    path: beginning_path,
                     runner: self,
                     query: query,
-                  )]
+                  )
+                elsif query.mutation?
+                  fields = {}
+                  all_selections = [fields, (prototype_result = {})]
+                  gather_selections(root_type, selected_operation.selections, nil, query, all_selections, prototype_result, into: fields)
+                  if all_selections.length > 2
+                    # TODO DRY with SelectionsStep with directive handling
+                    raise "Directives on root mutation type not implemented yet"
+                  end
+                  fields.each_value do |field_resolve_step|
+                    isolated_steps << [SelectionsStep.new(
+                      clobber: false, # `data` is being shared among several selections steps
+                      parent_type: root_type,
+                      selections: field_resolve_step.ast_nodes || Array(field_resolve_step.ast_node),
+                      objects: [root_value],
+                      results: [data],
+                      path: beginning_path,
+                      runner: self,
+                      query: query,
+                    )]
+                  end
+                elsif query.subscription?
+                  if !query.subscription_update?
+                    schema.subscriptions.initialize_subscriptions(query)
+                  end
+                  isolated_steps[0] << SelectionsStep.new(
+                    parent_type: root_type,
+                    selections: selected_operation.selections,
+                    objects: [root_value],
+                    results: [data],
+                    path: beginning_path,
+                    runner: self,
+                    query: query,
+                  )
+                else
+                  raise ArgumentError, "Unknown operation type (not query, mutation or subscription): #{query.query_string}"
                 end
-              when "subscription"
-                if !query.subscription_update?
-                  schema.subscriptions.initialize_subscriptions(query)
+              when "LIST"
+                inner_type = root_type.unwrap
+                case inner_type.kind.name
+                when "SCALAR", "ENUM"
+                  results << run_isolated_scalar(root_type, query.root_value, query.context)
+                else
+                  raise "Not implemented list type: #{root_type.to_type_signature}"
                 end
-                isolated_steps[0] << SelectionsStep.new(
-                  parent_type: root_type,
-                  selections: selected_operation.selections,
-                  objects: [root_value],
-                  results: [data],
-                  path: EmptyObjects::EMPTY_ARRAY,
-                  runner: self,
-                  query: query,
-                )
+              when "SCALAR", "ENUM"
+                results << run_isolated_scalar(root_type, query.root_value, query.context)
               else
-                raise ArgumentError, "Unhandled operation type: #{operation.operation_type.inspect}"
+                raise "Unhandled root type kind: #{root_type.kind.name.inspect}"
               end
 
               @static_type_at[data] = root_type
@@ -197,12 +209,11 @@ module GraphQL
                 @schema.subscriptions.finish_subscriptions(query)
               end
 
-              finalizers = query.finalizers
-              fin_result = if finalizers.empty?
+              fin_result = if !query.finalizers?
                 result
               else
                 data = result["data"]
-                data = run_finalizers(data, query, finalizers)
+                data = run_finalizers(data, query)
                 errors = []
                 query.context.errors.each do |err|
                   if err.respond_to?(:to_h)
@@ -279,33 +290,32 @@ module GraphQL
 
         private
 
-        def run_finalizers(data, query, finalizers)
-          paths_to_check = finalizers.map(&:path)
-          paths_to_check.compact! # root-level auth errors currently come without a path
+        def run_finalizers(data, query)
+          query_finalizers = query.top_level_finalizers
+          field_finalizers = query.field_finalizers
+          field_paths_to_check = field_finalizers.map(&:path)
+          query_paths_to_check = query_finalizers.map(&:path)
+
+          # root-level auth errors currently come without a path
+          field_paths_to_check.compact!
+          query_paths_to_check.compact!
+
           # TODO dry with above?
           # This is also where a query-level "Step" would be used?
           if (selected_operation = query.selected_operation)
-            root_type = case selected_operation.operation_type
-            when nil, "query"
-              query.schema.query
-            when "mutation"
-              query.schema.mutation
-            when "subscription"
-              query.schema.subscription
-            end
-            paths_to_check.each_with_index do |path_to_check, idx|
+            root_type = query.root_type
+            query_paths_to_check.each_with_index do |path_to_check, idx|
               if path_to_check.empty?
-                finalizer = finalizers[idx]
+                finalizer = query_finalizers[idx]
                 # Path is already `[]`
                 finalizer.finalize_graphql_result(query, data, nil)
-                finalizers[idx] = nil
               end
             end
-            check_object_result(query, data, root_type, selected_operation.selections, [], [], paths_to_check, finalizers)
+            check_object_result(query, data, root_type, selected_operation.selections, [], [], field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers)
           end
         end
 
-        def check_object_result(query, result_h, static_type, ast_selections, current_exec_path, current_result_path, paths_to_check, finalizers) # rubocop:disable Metrics/ParameterLists
+        def check_object_result(query, result_h, static_type, ast_selections, current_exec_path, current_result_path, field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers) # rubocop:disable Metrics/ParameterLists
           current_path_len = current_exec_path.length
           ast_selections.each do |ast_selection|
             case ast_selection
@@ -314,14 +324,8 @@ module GraphQL
                 key = ast_selection.alias || ast_selection.name
                 current_exec_path << key
                 current_result_path << key
-                this_finalizer_idx = nil
-                should_continue = false
-                paths_to_check.each_with_index do |path_to_check, idx|
-                  if this_finalizer_idx.nil? && current_exec_path == path_to_check
-                    this_finalizer_idx = idx
-                  end
-                  should_continue ||= path_to_check[current_path_len] == key
-                end
+                should_continue = field_paths_to_check.any? { |ptc| ptc[current_path_len] == key } || query_paths_to_check.any? { |ptc| ptc[current_path_len] == key }
+
                 if should_continue
                   result_value = result_h[key]
                   field_defn = query.context.types.field(static_type, ast_selection.name)
@@ -330,24 +334,30 @@ module GraphQL
                     result_type = result_type.of_type
                   end
 
+                  query_paths_to_check.each_with_index do |path_to_check, idx|
+                    if current_exec_path == path_to_check
+                      finalizer = query_finalizers.delete_at(idx)
+                      query_paths_to_check.delete_at(idx)
+                      finalizer.path = current_result_path.dup
+                      finalizer.finalize_graphql_result(query, result_h, key)
+                      result_value = result_h.key?(key) ? result_h[key] : :unassigned
+                    end
+                  end
+
+
                   new_result_value = if result_value.is_a?(Finalizer)
                     result_value.path = current_result_path.dup
                     result_value.finalize_graphql_result(query, result_h, key)
                     result_h.key?(key) ? result_h[key] : :unassigned
-                  elsif this_finalizer_idx
-                    if (finalizer = finalizers[this_finalizer_idx])
-                      finalizer.path = current_result_path.dup
-                      finalizer.finalize_graphql_result(query, result_h, key)
-                      finalizers[this_finalizer_idx] = nil
-                    end
+                  elsif :unassigned.equal?(result_value)
                     result_value
                   else
                     if result_type.list?
-                      check_list_result(query, result_value, result_type.of_type, ast_selection.selections, current_exec_path, current_result_path, paths_to_check, finalizers)
+                      check_list_result(query, result_value, result_type.of_type, ast_selection.selections, current_exec_path, current_result_path, field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers)
                     elsif !result_type.kind.leaf?
-                      check_object_result(query, result_value, result_type, ast_selection.selections, current_exec_path, current_result_path, paths_to_check, finalizers)
+                      check_object_result(query, result_value, result_type, ast_selection.selections, current_exec_path, current_result_path, field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers)
                     else
-                      result_value
+                      new_result_value || result_value
                     end
                   end
 
@@ -366,13 +376,13 @@ module GraphQL
             when Language::Nodes::InlineFragment
               static_type_at_result = @static_type_at[result_h]
               if static_type_at_result && ((t = ast_selection.type).nil? || type_condition_applies?(query.context, static_type_at_result, t.name))
-                result_h = check_object_result(query, result_h, static_type, ast_selection.selections, current_exec_path, current_result_path, paths_to_check, finalizers)
+                result_h = check_object_result(query, result_h, static_type, ast_selection.selections, current_exec_path, current_result_path, field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers)
               end
             when Language::Nodes::FragmentSpread
               fragment_defn = query.document.definitions.find { |defn| defn.is_a?(Language::Nodes::FragmentDefinition) && defn.name == ast_selection.name }
               static_type_at_result = @static_type_at[result_h]
               if static_type_at_result && type_condition_applies?(query.context, static_type_at_result, fragment_defn.type.name)
-                result_h = check_object_result(query, result_h, static_type, fragment_defn.selections, current_exec_path, current_result_path, paths_to_check, finalizers)
+                result_h = check_object_result(query, result_h, static_type, fragment_defn.selections, current_exec_path, current_result_path, field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers)
               end
             end
           end
@@ -380,7 +390,7 @@ module GraphQL
           result_h
         end
 
-        def check_list_result(query, result_arr, inner_type, ast_selections, current_exec_path, current_result_path, paths_to_check, finalizers) # rubocop:disable Metrics/ParameterLists
+        def check_list_result(query, result_arr, inner_type, ast_selections, current_exec_path, current_result_path, field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers) # rubocop:disable Metrics/ParameterLists
           inner_type_non_null = false
           if inner_type.non_null?
             inner_type_non_null = true
@@ -395,9 +405,9 @@ module GraphQL
               result_item.finalize_graphql_result(query, result_arr, idx)
               result_arr[idx]
             elsif inner_type.list?
-              check_list_result(query, result_item, inner_type.of_type, ast_selections, current_exec_path, current_result_path, paths_to_check, finalizers)
+              check_list_result(query, result_item, inner_type.of_type, ast_selections, current_exec_path, current_result_path, field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers)
             elsif !inner_type.kind.leaf?
-              check_object_result(query, result_item, inner_type, ast_selections, current_exec_path, current_result_path, paths_to_check, finalizers)
+              check_object_result(query, result_item, inner_type, ast_selections, current_exec_path, current_result_path, field_paths_to_check, field_finalizers, query_paths_to_check, query_finalizers)
             else
               result_item
             end
@@ -454,6 +464,13 @@ module GraphQL
             c_p_types = @schema.possible_types(concrete_type, context)
             p_types.any? { |t| c_p_types.include?(t) }
           end
+        end
+
+        def run_isolated_scalar(type, value, context)
+          if lazy?(value)
+            value = @schema.sync_lazy(value)
+          end
+          { "data" => type.coerce_result(value, context) }
         end
       end
     end

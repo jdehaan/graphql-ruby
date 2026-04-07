@@ -73,6 +73,10 @@ module GraphQL
         def finalize_graphql_result(query, result_data, result_key)
           raise RequiredImplementationMissingError
         end
+
+        def continue_execution?
+          true
+        end
       end
     end
   end

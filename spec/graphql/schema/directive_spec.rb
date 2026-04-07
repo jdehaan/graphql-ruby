@@ -150,8 +150,8 @@ Use `locations(OBJECT)` to update this directive's definition, or remove it from
         end
 
         def finalize_graphql_result(query, result_data, result_key)
-          counts = query.context[:count_fields] ||= Hash.new { |h, k| h[k] = [] }
-          count = case @ast_node
+          counts = query.context[:count_fields] ||= {}
+          counts[path] ||= [case @ast_node
           when GraphQL::Language::Nodes::Field
             1
           when GraphQL::Language::Nodes::InlineFragment
@@ -161,21 +161,20 @@ Use `locations(OBJECT)` to update this directive's definition, or remove it from
             frag.selections.size
           else
             raise ArgumentError, "Unexpected ast_node: #{ast_node.inspect}"
-          end
-          counts[path] << count
+          end]
         end
       end
 
       def self.resolve_field(ast_nodes, parent_type, field_defn, objects, arguments, context)
-        context.query.add_finalizer(FieldCount.new(ast_nodes.first))
+        FieldCount.new(ast_nodes.first)
       end
 
-      def self.resolve_inline_fragment(ast_node, parent_type, objects, context)
-        context.query.add_finalizer(FieldCount.new(ast_node))
+      def self.resolve_inline_fragment(ast_node, parent_type, objects, _args, context)
+        FieldCount.new(ast_node)
       end
 
-      def self.resolve_fragment_spread(ast_node, parent_type, objects, context)
-        context.query.add_finalizer(FieldCount.new(ast_node))
+      def self.resolve_fragment_spread(ast_node, parent_type, objects, _args, context)
+        FieldCount.new(ast_node)
       end
     end
 

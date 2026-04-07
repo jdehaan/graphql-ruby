@@ -22,6 +22,10 @@ module GraphQL
         @type_signature ||= -"[#{@of_type.to_type_signature}]"
       end
 
+      def authorizes?(ctx)
+        of_type.authorizes?(ctx)
+      end
+
       # This is for introspection, where it's expected the name will be `null`
       def graphql_name
         nil

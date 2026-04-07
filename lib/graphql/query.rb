@@ -48,6 +48,28 @@ module GraphQL
       def handle_or_reraise(err)
         @schema.handle_or_reraise(context, err)
       end
+
+      def finalizers?
+        @finalizers || @top_level_finalizers || context.errors.any? # rubocop:disable Development/NoneWithoutBlockCop
+      end
+
+      # @return [Array<Execution::Next::Finalizer>]
+      def field_finalizers
+        @finalizers ? (@finalizers + context.errors) : context.errors
+      end
+
+      def top_level_finalizers
+        @top_level_finalizers || EmptyObjects::EMPTY_ARRAY
+      end
+
+      # @api private
+      # @param finalizer [Execution::Next::Finalizer]
+      # @return [Execution::NextFinalizer] `finalizer`
+      def add_finalizer(finalizer, top_level = false)
+        f = top_level ? (@top_level_finalizers ||= []) : (@finalizers ||= [])
+        f << finalizer
+        finalizer
+      end
     end
 
     include Runnable
@@ -159,6 +181,7 @@ module GraphQL
       @root_value = root_value
       @fragments = nil
       @operations = nil
+      @finalizers = @top_level_finalizers = nil
       @validate = validate
       self.static_validator = static_validator if static_validator
       context_tracers = (context ? context.fetch(:tracers, []) : [])
@@ -262,6 +285,10 @@ module GraphQL
       with_prepared_ast { @operations }
     end
 
+    def path
+      EmptyObjects::EMPTY_ARRAY
+    end
+
     # Run subtree partials of this query and return their results.
     # Each partial is identified with a `path:` and `object:`
     # where the path references a field in the AST and the object will be treated
@@ -271,7 +298,11 @@ module GraphQL
     # @return [Array<GraphQL::Query::Result>]
     def run_partials(partials_hashes)
       partials = partials_hashes.map { |partial_options| Partial.new(query: self, **partial_options) }
-      Execution::Interpreter.run_all(@schema, partials, context: @context)
+      if context[:__graphql_execute_next]
+        Execution::Next.run_all(@schema, partials, context: @context)
+      else
+        Execution::Interpreter.run_all(@schema, partials, context: @context)
+      end
     end
 
     # Get the result for this query, executing it once
@@ -296,19 +327,6 @@ module GraphQL
     # @return [GraphQL::Language::Nodes::OperationDefinition, nil]
     def selected_operation
       with_prepared_ast { @selected_operation }
-    end
-
-    # @return [Array<Execution::Next::Finalizer>]
-    def finalizers
-      @finalizers ? (@finalizers + context.errors) : context.errors
-    end
-
-    # @param finalizer [Execution::Next::Finalizer]
-    # @return [Execution::NextFinalizer] `finalizer`
-    def add_finalizer(finalizer)
-      f = @finalizers ||= []
-      f << finalizer
-      finalizer
     end
 
     # Determine the values for variables of this query, using default values

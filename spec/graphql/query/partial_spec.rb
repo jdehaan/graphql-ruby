@@ -45,20 +45,28 @@ describe GraphQL::Query::Partial do
 
     module Entity
       include GraphQL::Schema::Interface
-      field :name, String
+      field :name, String, resolve_each: true
     end
 
     class Farm < GraphQL::Schema::Object
       implements Entity
       field :name, String
       field :products, [FarmProduct]
-      field :error, Int
+      field :error, Int, resolve_static: true
 
-      def error
+      def self.error(context)
         raise GraphQL::ExecutionError, "This is a field error"
       end
 
-      field :neighboring_farm, Farm
+      def error
+        self.class.error(context)
+      end
+
+      field :neighboring_farm, Farm, resolve_batch: true
+
+      def self.neighboring_farm(objects, context)
+        context.dataload_all(FarmSource, objects.map(&:neighboring_farm_id))
+      end
 
       def neighboring_farm
         dataloader.with(FarmSource).load(object.neighboring_farm_id)
@@ -66,10 +74,16 @@ describe GraphQL::Query::Partial do
     end
 
     class UpcasedFarm < GraphQL::Schema::Object
-      field :name, String
+      field :name, String, resolve_each: true
+
+      graphql_name "UpcasedFarm"
+
+      def self.name(object, context)
+        object[:name].upcase
+      end
 
       def name
-        object[:name].upcase
+        self.class.name(object, context)
       end
     end
 
@@ -85,57 +99,83 @@ describe GraphQL::Query::Partial do
     class Query < GraphQL::Schema::Object
       field :farms, [Farm], fallback_value: Database::FARMS.values
 
-      field :farm, Farm do
+      field :farm, Farm, resolve_static: true do
         argument :id, ID, loads: Farm, as: :farm
       end
 
-      def farm(farm:)
+      def self.farm(context, farm:)
         farm
+      end
+
+      def farm(farm:)
+        self.class.farm(context, farm: farm)
       end
 
       field :farm_names, [String], fallback_value: Database::FARMS.each_value.map(&:name)
 
       field :query, Query, fallback_value: true
 
-      field :thing, Thing
+      field :thing, Thing, resolve_static: true
 
-      def thing
+      def self.thing(context)
         Database.get("1")
       end
 
-      field :entity, Entity
-      def entity; Database.get("1"); end
+      def thing
+        self.class.thing(context)
+      end
 
-      field :read_context, String do
+      field :entity, Entity, resolve_static: true
+      def self.entity(context)
+        Database.get("1")
+      end
+
+      def entity
+        self.class.entity(context)
+      end
+
+      field :read_context, String, resolve_static: true do
         argument :key, String
       end
 
-      def read_context(key:)
+      def self.read_context(context, key:)
         -> { context[key].to_s }
       end
 
-      field :current_path, [String]
+      def read_context(key:)
+        self.class.read_context(context, key: key)
+      end
+
+      field :current_path, [String], resolve_legacy_instance_method: true
       def current_path
         context.current_path
       end
 
-      field :current_values, [String]
-      def current_values
+      field :current_values, [String], resolve_static: true
+      def self.current_values(context)
         [
           GraphQL::Current.operation_name,
           GraphQL::Current.field.path,
           GraphQL::Current.dataloader_source_class.inspect,
         ]
       end
+
+      def current_values
+        self.class.current_values(context)
+      end
     end
 
     class Mutation < GraphQL::Schema::Object
-      field :update_farm, Farm do
+      field :update_farm, Farm, resolve_static: true do
         argument :name, String
       end
 
+      def self.update_farm(context, name:)
+        OpenStruct.new({ name: name })
+      end
+
       def update_farm(name:)
-        { name: name }
+        self.class.update_farm(context, name: name)
       end
     end
 
@@ -151,6 +191,7 @@ describe GraphQL::Query::Partial do
     end
 
     use GraphQL::Dataloader
+    use GraphQL::Execution::Next
     lazy_resolve Proc, :call
   end
 
@@ -160,6 +201,9 @@ describe GraphQL::Query::Partial do
 
   def run_partials(string, partial_configs, **query_kwargs)
     query = GraphQL::Query.new(PartialSchema, string, **query_kwargs)
+    if TESTING_EXEC_NEXT
+      query.context[:__graphql_execute_next] = true
+    end
     query.run_partials(partial_configs)
   end
 
@@ -172,7 +216,7 @@ describe GraphQL::Query::Partial do
     results = run_partials(str, [
       { path: ["farm1"], object: PartialSchema::Database::FARMS["1"] },
       { path: ["farm2"], object: OpenStruct.new(name: "Injected Farm") },
-      { path: ["farms", 0], object: { name: "Kestrel Hollow", products: [:__MEAT__, "EGGS"]} },
+      { path: ["farms", 0], object: OpenStruct.new({ name: "Kestrel Hollow", products: [:__MEAT__, "EGGS"]}) },
     ])
 
     assert_equal [
@@ -198,8 +242,8 @@ describe GraphQL::Query::Partial do
     fragment_node = document.definitions.first.selections.first.selections.first
     other_fragment_node = fragment_node.selections[1]
     results = run_partials(str, [
-      { fragment_node: fragment_node, type: PartialSchema::Farm, object: { name: "Belair Farm" } },
-      { fragment_node: other_fragment_node, type: PartialSchema::UpcasedFarm, object: { name: "Free Union Grass Farm" } }
+      { fragment_node: fragment_node, type: PartialSchema::Farm, object: OpenStruct.new({ name: "Belair Farm" }) },
+      { fragment_node: other_fragment_node, type: PartialSchema::UpcasedFarm, object: OpenStruct.new({ name: "Free Union Grass Farm" }) }
     ])
     assert_equal({ "name" => "Belair Farm", "n2" => "Belair Farm" }, results[0]["data"])
     assert_equal({ "n2" => "FREE UNION GRASS FARM" }, results[1]["data"])
@@ -215,7 +259,7 @@ describe GraphQL::Query::Partial do
     }"
 
     node = GraphQL.parse(str).definitions.last
-    results = run_partials(str, [{ fragment_node: node, type: PartialSchema::Farm, object: { name: "Clovertop Creamery" } }])
+    results = run_partials(str, [{ fragment_node: node, type: PartialSchema::Farm, object: OpenStruct.new({ name: "Clovertop Creamery" }) }])
     assert_equal({ "farmName" => "Clovertop Creamery" }, results[0]["data"])
   end
 
@@ -299,7 +343,7 @@ describe GraphQL::Query::Partial do
 
   it "runs arrays and returns useful metadata in the result" do
     str = "{ farms { name } }"
-    results = run_partials(str, [{ path: ["farms"], object: [{ name: "Twenty Paces" }, { name: "Spring Creek Blooms" }]}])
+    results = run_partials(str, [{ path: ["farms"], object: [OpenStruct.new({ name: "Twenty Paces" }), OpenStruct.new({ name: "Spring Creek Blooms" })]}])
     result = results.first
     assert_equal [{ "name" => "Twenty Paces" }, { "name" => "Spring Creek Blooms" }], result["data"]
     assert_equal ["farms"], result.path
@@ -466,7 +510,7 @@ describe GraphQL::Query::Partial do
     str = "mutation { updateFarm(name: \"Brawndo Acres\") { name } }"
     results = run_partials(str, [
       { path: [], object: nil },
-      { path: ["updateFarm"], object: { name: "Georgetown Farm" } },
+      { path: ["updateFarm"], object: OpenStruct.new({ name: "Georgetown Farm" }) },
       { path: ["updateFarm", "name"], object: "Notta Farm" },
     ])
 

@@ -112,10 +112,11 @@ module GraphQL
 
         def inherited(subclass)
           super
+          parent_class = self
           subclass.class_exec do
             @default_graphql_name ||= nil
-            @locations = locations
-            @is_runtime = runtime?
+            @locations = parent_class.locations
+            @is_runtime = parent_class.runtime?
             @repeatable = false
           end
         end
