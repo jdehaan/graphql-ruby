@@ -40,9 +40,9 @@ module GraphQL
           end
         end
 
+
         multiplex_analyzers.map!(&:result)
         multiplex_errors = analysis_errors(EmptyObjects::EMPTY_ARRAY, multiplex_analyzers)
-
         multiplex.queries.each_with_index do |query, idx|
           query.analysis_errors = analysis_errors(multiplex_errors, query_results[idx])
         end
@@ -56,13 +56,10 @@ module GraphQL
     def analyze_query(query, analyzers, multiplex_analyzers: [])
       query.current_trace.analyze_query(query: query) do
         query_analyzers = analyzers.map { |analyzer| analyzer.new(query) }
-
         query_analyzers.select!(&:analyze?)
-
-        analyzers_to_run = multiplex_analyzers.empty? ? query_analyzers : query_analyzers + multiplex_analyzers
+        analyzers_to_run = query_analyzers + multiplex_analyzers
 
         if !analyzers_to_run.empty?
-
           analyzers_to_run.select!(&:visit?)
           if !analyzers_to_run.empty?
             visitor = GraphQL::Analysis::Visitor.new(
@@ -92,7 +89,7 @@ module GraphQL
 
     def analysis_errors(parent_errors, results)
       if !results.empty?
-        results.flatten!
+        results = results.flatten
         results.select! { |r| r.is_a?(GraphQL::AnalysisError) }
       end
 

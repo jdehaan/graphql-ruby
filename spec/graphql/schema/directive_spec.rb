@@ -187,7 +187,7 @@ Use `locations(OBJECT)` to update this directive's definition, or remove it from
       field :thing, Thing, null: false, extras: [:ast_node], resolve_static: true
 
       def thing(ast_node:)
-        self.class.thing(ast_node: ast_node)
+        self.class.thing(context, ast_node: ast_node)
       end
 
       resolver_methods do

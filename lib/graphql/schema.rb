@@ -1562,7 +1562,7 @@ module GraphQL
 
       def query_analyzers
         inherited_qa = find_inherited_value(:query_analyzers, EMPTY_ARRAY)
-        inherited_qa.length > 0 ? (inherited_qa + own_query_analyzers) : own_query_analyzers
+        inherited_qa.empty? ? own_query_analyzers : (inherited_qa + own_query_analyzers)
       end
 
       # @param new_analyzer [Class<GraphQL::Analysis::Analyzer>] An analyzer to run on multiplexes to this schema
