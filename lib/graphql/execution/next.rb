@@ -73,9 +73,14 @@ module GraphQL
         def finalize_graphql_result(query, result_data, result_key)
           raise RequiredImplementationMissingError
         end
+      end
 
-        def continue_execution?
-          true
+      module HaltExecution
+      end
+
+      module PostProcessor
+        def after_resolve(field_results)
+          raise RequiredImplementationMissingError, "#{self.class}#after_resolve should handle `field_results` and return a new value to use"
         end
       end
     end

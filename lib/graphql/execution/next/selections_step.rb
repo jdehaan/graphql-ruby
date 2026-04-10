@@ -35,6 +35,7 @@ module GraphQL
             selections_prototype_result = @all_selections[i + 1]
             if (directives_owner = grouped_selections.delete(:__node))
               directives = directives_owner.directives
+              continue_execution = true
               directives.each do |dir_node|
                 dir_defn = @runner.runtime_directives[dir_node.name]
                 if dir_defn # not present for `skip` or `include`
@@ -56,10 +57,15 @@ module GraphQL
                   if result.is_a?(Finalizer)
                     result.path = path
                     query.add_finalizer(result, true)
-                    if result.continue_execution?
-                      prototype_result.merge!(selections_prototype_result)
-                      grouped_selections.each_value { |v| continue_selections << v }
+                    if result.is_a?(HaltExecution)
+                      continue_execution = false
+                      break
                     end
+                  end
+
+                  if continue_execution
+                    prototype_result.merge!(selections_prototype_result)
+                    grouped_selections.each_value { |v| continue_selections << v }
                   end
                 else
                   grouped_selections.each_value { |v| continue_selections << v }

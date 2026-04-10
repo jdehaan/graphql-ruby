@@ -386,6 +386,7 @@ module GraphQL
               end
             end
 
+            post_processors = nil
             if directives
               directives.each do |dir_node|
                 if (dir_defn = @runner.runtime_directives[dir_node.name])
@@ -393,10 +394,18 @@ module GraphQL
                   # here and with fragments.
                   dir_args = coerce_arguments(dir_defn, dir_node.arguments, false)
                   result = dir_defn.resolve_field(ast_nodes, @parent_type, field_definition, authorized_objects, dir_args, ctx)
-                  if result.is_a?(Finalizer)
-                    result.path = path
-                    query.add_finalizer(result, true)
-                    if !result.continue_execution?
+                  if !result.nil?
+                    if result.is_a?(Finalizer)
+                      result.path = path
+                      query.add_finalizer(result, true)
+                    end
+
+                    if result.is_a?(PostProcessor)
+                      post_processors ||= []
+                      post_processors << result
+                    end
+
+                    if result.is_a?(HaltExecution)
                       return
                     end
                   end
@@ -418,6 +427,12 @@ module GraphQL
             @finish_extension_idx = 0
           else
             @field_results = resolve_batch(authorized_objects, ctx, @arguments)
+          end
+
+          if post_processors
+            post_processors.each do |post_processor|
+              @field_results = post_processor.after_resolve(@field_results)
+            end
           end
 
           query.current_trace.end_execute_field(@field_definition, @arguments, authorized_objects, query, @field_results)
