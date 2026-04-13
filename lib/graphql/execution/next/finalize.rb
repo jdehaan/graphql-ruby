@@ -3,12 +3,14 @@ module GraphQL
   module Execution
     module Next
       class Finalize
-        # TODO move more common values and state from arguments to instance variables
+        # TODO early-return when no more finalizers to run?
         def initialize(query, data, runner)
           @query = query
           @data = data
           @static_type_at = runner.static_type_at
           @runner = runner
+          @current_exec_path = []
+          @current_result_path = []
           @finalizers = runner.finalizers
           query.context.errors.each do |err|
             @finalizers[err] = err
@@ -16,8 +18,8 @@ module GraphQL
         end
 
         def run
-          if (selected_operation = @query.selected_operation)
-            check_object_result(@data, @query.root_type, selected_operation.selections, [], [])
+          if (selected_operation = @query.selected_operation) && @data
+            check_object_result(@data, @query.root_type, selected_operation.selections)
           else
             @data
           end
@@ -37,9 +39,9 @@ module GraphQL
           end
         end
 
-        def check_object_result(result_h, parent_type, ast_selections, current_exec_path, current_result_path)
+        def check_object_result(result_h, parent_type, ast_selections)
           if (f = @finalizers[result_h])
-            run_finalizers(current_result_path.dup, f, result_h, nil)
+            run_finalizers(@current_result_path.dup, f, result_h, nil)
           end
 
           if parent_type.kind.abstract?
@@ -51,8 +53,8 @@ module GraphQL
             when Language::Nodes::Field
               begin
                 key = ast_selection.alias || ast_selection.name
-                current_exec_path << key
-                current_result_path << key
+                @current_exec_path << key
+                @current_result_path << key
 
                 result_value = result_h[key]
                 field_defn = @query.context.types.field(parent_type, ast_selection.name) || raise("Invariant: No field found for #{static_type.to_type_signature}.#{ast_selection.name}")
@@ -62,13 +64,13 @@ module GraphQL
                 end
 
                 new_result_value = if (finalizer_or_finalizers = @finalizers[result_value])
-                  run_finalizers(current_result_path.dup, finalizer_or_finalizers, result_h, key)
+                  run_finalizers(@current_result_path.dup, finalizer_or_finalizers, result_h, key)
                   result_h.key?(key) ? result_h[key] : :unassigned
                 else
                   if result_type.list?
-                    check_list_result(result_value, result_type.of_type, ast_selection.selections, current_exec_path, current_result_path)
-                  elsif !result_type.kind.leaf?
-                    check_object_result(result_value, result_type, ast_selection.selections, current_exec_path, current_result_path)
+                    check_list_result(result_value, result_type.of_type, ast_selection.selections)
+                  elsif !result_type.kind.leaf? && result_value
+                    check_object_result(result_value, result_type, ast_selection.selections)
                   else
                     new_result_value || result_value
                   end
@@ -82,8 +84,8 @@ module GraphQL
                   result_h[key] = new_result_value
                 end
               ensure
-                current_exec_path.pop
-                current_result_path.pop
+                @current_exec_path.pop
+                @current_result_path.pop
               end
             when Language::Nodes::InlineFragment
               static_type_at_result = @static_type_at[result_h]
@@ -91,13 +93,13 @@ module GraphQL
                   (t = ast_selection.type).nil? ||
                   @runner.type_condition_applies?(@query.context, static_type_at_result, t.name)
                 )
-                result_h = check_object_result(result_h, parent_type, ast_selection.selections, current_exec_path, current_result_path)
+                result_h = check_object_result(result_h, parent_type, ast_selection.selections)
               end
             when Language::Nodes::FragmentSpread
               fragment_defn = @query.document.definitions.find { |defn| defn.is_a?(Language::Nodes::FragmentDefinition) && defn.name == ast_selection.name }
               static_type_at_result = @static_type_at[result_h]
               if static_type_at_result && @runner.type_condition_applies?(@query.context, static_type_at_result, fragment_defn.type.name)
-                result_h = check_object_result(result_h, parent_type, fragment_defn.selections, current_exec_path, current_result_path)
+                result_h = check_object_result(result_h, parent_type, fragment_defn.selections)
               end
             end
           end
@@ -105,7 +107,7 @@ module GraphQL
           result_h
         end
 
-        def check_list_result(result_arr, inner_type, ast_selections, current_exec_path, current_result_path)
+        def check_list_result(result_arr, inner_type, ast_selections)
           inner_type_non_null = false
           if inner_type.non_null?
             inner_type_non_null = true
@@ -119,14 +121,14 @@ module GraphQL
           end
 
           result_arr.each_with_index do |result_item, idx|
-            current_result_path << idx
+            @current_result_path << idx
             new_result = if (f = @finalizers[result_item])
-              run_finalizers(current_result_path.dup, f, result_arr, idx)
+              run_finalizers(@current_result_path.dup, f, result_arr, idx)
               result_arr[idx] # TODO :unassigned?
             elsif inner_type.list?
-              check_list_result(result_item, inner_type.of_type, ast_selections, current_exec_path, current_result_path)
-            elsif !inner_type.kind.leaf? && !result_item.nil?
-              check_object_result(result_item, inner_type, ast_selections, current_exec_path, current_result_path)
+              check_list_result(result_item, inner_type.of_type, ast_selections)
+            elsif !inner_type.kind.leaf? && result_item
+              check_object_result(result_item, inner_type, ast_selections)
             else
               result_item
             end
@@ -138,7 +140,7 @@ module GraphQL
               result_arr[idx] = new_result
             end
           ensure
-            current_result_path.pop
+            @current_result_path.pop
           end
 
           if new_invalid_null

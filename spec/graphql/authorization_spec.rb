@@ -345,6 +345,8 @@ describe "GraphQL::Authorization" do
       def self.visible?(ctx)
         !!ctx[:show_nothing_directive]
       end
+
+      def self.resolve_field(...); end
     end
 
     class Schema < GraphQL::Schema
