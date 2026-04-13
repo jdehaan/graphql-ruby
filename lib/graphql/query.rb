@@ -48,28 +48,6 @@ module GraphQL
       def handle_or_reraise(err)
         @schema.handle_or_reraise(context, err)
       end
-
-      def finalizers?
-        @finalizers || @top_level_finalizers || context.errors.any? # rubocop:disable Development/NoneWithoutBlockCop
-      end
-
-      # @return [Array<Execution::Next::Finalizer>]
-      def field_finalizers
-        @finalizers ? (@finalizers + context.errors) : context.errors
-      end
-
-      def top_level_finalizers
-        @top_level_finalizers || EmptyObjects::EMPTY_ARRAY
-      end
-
-      # @api private
-      # @param finalizer [Execution::Next::Finalizer]
-      # @return [Execution::NextFinalizer] `finalizer`
-      def add_finalizer(finalizer, top_level = false)
-        f = top_level ? (@top_level_finalizers ||= []) : (@finalizers ||= [])
-        f << finalizer
-        finalizer
-      end
     end
 
     include Runnable

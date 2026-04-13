@@ -1,0 +1,153 @@
+# frozen_string_literal: true
+module GraphQL
+  module Execution
+    module Next
+      class Finalize
+        # TODO move more common values and state from arguments to instance variables
+        def initialize(query, data, runner)
+          @query = query
+          @data = data
+          @static_type_at = runner.static_type_at
+          @runner = runner
+          @finalizers = runner.finalizers
+          query.context.errors.each do |err|
+            @finalizers[err] = err
+          end
+        end
+
+        def run
+          if (selected_operation = @query.selected_operation)
+            check_object_result(@data, @query.root_type, selected_operation.selections, [], [])
+          else
+            @data
+          end
+        end
+
+        private
+
+        def run_finalizers(result_path, finalizer_or_finalizers, result_data, result_key)
+          if finalizer_or_finalizers.is_a?(Array)
+            finalizer_or_finalizers.each { |f|
+              f.path = result_path
+              f.finalize_graphql_result(@query, result_data, result_key)
+            }
+          else
+            finalizer_or_finalizers.path = result_path
+            finalizer_or_finalizers.finalize_graphql_result(@query, result_data, result_key)
+          end
+        end
+
+        def check_object_result(result_h, parent_type, ast_selections, current_exec_path, current_result_path)
+          if (f = @finalizers[result_h])
+            run_finalizers(current_result_path.dup, f, result_h, nil)
+          end
+
+          if parent_type.kind.abstract?
+            parent_type = @runner.runtime_type_at[result_h]
+          end
+
+          ast_selections.each do |ast_selection|
+            case ast_selection
+            when Language::Nodes::Field
+              begin
+                key = ast_selection.alias || ast_selection.name
+                current_exec_path << key
+                current_result_path << key
+
+                result_value = result_h[key] || raise("Invariant: No result_h for #{current_exec_path} (#{result_h})")
+                field_defn = @query.context.types.field(parent_type, ast_selection.name) || raise("Invariant: No field found for #{static_type.to_type_signature}.#{ast_selection.name}")
+                result_type = field_defn.type
+                if (result_type_non_null = result_type.non_null?)
+                  result_type = result_type.of_type
+                end
+
+                new_result_value = if (finalizer_or_finalizers = @finalizers[result_value])
+                  run_finalizers(current_result_path.dup, finalizer_or_finalizers, result_h, key)
+                  result_h.key?(key) ? result_h[key] : :unassigned
+                else
+                  if result_type.list?
+                    check_list_result(result_value, result_type.of_type, ast_selection.selections, current_exec_path, current_result_path)
+                  elsif !result_type.kind.leaf?
+                    check_object_result(result_value, result_type, ast_selection.selections, current_exec_path, current_result_path)
+                  else
+                    new_result_value || result_value
+                  end
+                end
+
+                if new_result_value.nil? && result_type_non_null
+                  return nil
+                elsif :unassigned.equal?(new_result_value)
+                  # Do nothing
+                elsif !new_result_value.equal?(result_value)
+                  result_h[key] = new_result_value
+                end
+              ensure
+                current_exec_path.pop
+                current_result_path.pop
+              end
+            when Language::Nodes::InlineFragment
+              static_type_at_result = @static_type_at[result_h]
+              if static_type_at_result && (
+                  (t = ast_selection.type).nil? ||
+                  @runner.type_condition_applies?(@query.context, static_type_at_result, t.name)
+                )
+                result_h = check_object_result(result_h, parent_type, ast_selection.selections, current_exec_path, current_result_path)
+              end
+            when Language::Nodes::FragmentSpread
+              fragment_defn = @query.document.definitions.find { |defn| defn.is_a?(Language::Nodes::FragmentDefinition) && defn.name == ast_selection.name }
+              static_type_at_result = @static_type_at[result_h]
+              if static_type_at_result && @runner.type_condition_applies?(@query.context, static_type_at_result, fragment_defn.type.name)
+                result_h = check_object_result(result_h, parent_type, fragment_defn.selections, current_exec_path, current_result_path)
+              end
+            end
+          end
+
+          result_h
+        end
+
+        def check_list_result(result_arr, inner_type, ast_selections, current_exec_path, current_result_path)
+          inner_type_non_null = false
+          if inner_type.non_null?
+            inner_type_non_null = true
+            inner_type = inner_type.of_type
+          end
+
+          new_invalid_null = false
+
+          if (f = @finalizers[result_arr])
+            run_finalizers(current_result_path.dup, f, result_arr, nil)
+          end
+
+          result_arr.each_with_index do |result_item, idx|
+            current_result_path << idx
+            new_result = if (f = @finalizers[result_item])
+              run_finalizers(current_result_path.dup, f, result_arr, idx)
+              result_arr[idx] # TODO :unassigned?
+            elsif inner_type.list?
+              check_list_result(result_item, inner_type.of_type, ast_selections, current_exec_path, current_result_path)
+            elsif !inner_type.kind.leaf? && !result_item.nil?
+              check_object_result(result_item, inner_type, ast_selections, current_exec_path, current_result_path)
+            else
+              result_item
+            end
+
+            if new_result.nil? && inner_type_non_null
+              new_invalid_null = true
+              result_arr[idx] = nil
+            elsif !new_result.equal?(result_item)
+              result_arr[idx] = new_result
+            end
+          ensure
+            current_result_path.pop
+          end
+
+          if new_invalid_null
+            nil
+          else
+            result_arr
+          end
+        end
+      end
+    end
+  end
+end

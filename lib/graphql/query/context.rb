@@ -129,8 +129,7 @@ module GraphQL
       # @param value [Object] Any object to be inserted directly into the final response
       # @return [GraphQL::Execution::Interpreter::RawValue] Return this from the field
       def raw_value(value)
-        rv = GraphQL::Execution::Interpreter::RawValue.new(rv)
-        query.add_finalizer(rv)
+        GraphQL::Execution::Interpreter::RawValue.new(value)
       end
 
       # @example Print the GraphQL backtrace during field resolution

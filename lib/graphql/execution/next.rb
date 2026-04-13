@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 require "graphql/execution/next/prepare_object_step"
 require "graphql/execution/next/field_resolve_step"
+require "graphql/execution/next/finalize"
 require "graphql/execution/next/load_argument_step"
 require "graphql/execution/next/runner"
 require "graphql/execution/next/selections_step"

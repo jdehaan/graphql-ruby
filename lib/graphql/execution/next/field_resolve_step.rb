@@ -386,7 +386,7 @@ module GraphQL
               end
             end
 
-            post_processors = nil
+            finalizers = post_processors = nil
             if directives
               directives.each do |dir_node|
                 if (dir_defn = @runner.runtime_directives[dir_node.name])
@@ -397,7 +397,8 @@ module GraphQL
                   if !result.nil?
                     if result.is_a?(Finalizer)
                       result.path = path
-                      query.add_finalizer(result, true)
+                      finalizers ||= []
+                      finalizers << result
                     end
 
                     if result.is_a?(PostProcessor)
@@ -432,6 +433,12 @@ module GraphQL
           if post_processors
             post_processors.each do |post_processor|
               @field_results = post_processor.after_resolve(@field_results)
+            end
+          end
+
+          finalizers&.each do |finalizer|
+            @field_results.each do |fr|
+              @runner.add_finalizer(fr, finalizer)
             end
           end
 
@@ -577,7 +584,7 @@ module GraphQL
                   add_graphql_error(field_result)
                 else
                   field_result.path = path
-                  ctx.query.add_finalizer(finalizer)
+                  @runner.add_finalizer(field_result, field_result)
                 end
               else
                 # TODO `nil`s in [T!] types aren't handled
@@ -658,7 +665,7 @@ module GraphQL
               add_graphql_error(field_result)
             else
               field_result.path = path
-              @selections_step.query.add_finalizer(field_result)
+              @runner.add_finalizer(field_result, field_result)
               field_result
             end
           elsif is_list
