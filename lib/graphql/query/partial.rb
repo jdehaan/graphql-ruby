@@ -174,7 +174,7 @@ module GraphQL
           end
 
           if next_selections.empty?
-            raise ArgumentError, "Path `#{@path.inspect}` is not present in this query. `#{name_in_doc.inspect}` was not found. Try a different path or rewrite the query to include it."
+            raise ArgumentError, "Path `#{@path.inspect}` is not present in this query. `#{name_in_doc.inspect}` was not found. Try a different path or rewrite the query to include it. Selections: \n#{selections.map(&:to_query_string).join("\n")}"
           end
           field_name = next_selections.first.name
           field_defn = @schema.get_field(type, field_name, @query.context) || raise("Invariant: no field called #{field_name} on #{type.graphql_name}")

@@ -22,6 +22,7 @@ module GraphQL
           @finish_extension_idx = nil
           @was_scoped = nil
           @pending_steps = nil
+          @directive_finalizers = nil
         end
 
         attr_reader :ast_node, :key, :parent_type, :selections_step, :runner,
@@ -218,7 +219,7 @@ module GraphQL
         def value
           query = @selections_step.query
           query.current_trace.begin_execute_field(@field_definition, @arguments, @field_results, query)
-          @field_results = sync(@field_results)
+          sync(@field_results)
           query.current_trace.end_execute_field(@field_definition, @arguments, @field_results, query, @field_results)
           @runner.add_step(self)
           true
@@ -264,6 +265,7 @@ module GraphQL
         end
 
         def add_graphql_error(err)
+          p [:add_error, err, path, ast_nodes&.map(&:class)]
           err.path = path
           err.ast_nodes = ast_nodes
           @selections_step.query.context.add_error(err)
@@ -384,7 +386,7 @@ module GraphQL
               end
             end
 
-            finalizers = post_processors = nil
+            post_processors = nil
             if directives
               directives.each do |dir_node|
                 if (dir_defn = @runner.runtime_directives[dir_node.name])
@@ -395,8 +397,8 @@ module GraphQL
                   if !result.nil?
                     if result.is_a?(Finalizer)
                       result.path = path
-                      finalizers ||= []
-                      finalizers << result
+                      @directive_finalizers ||= []
+                      @directive_finalizers << result
                     end
 
                     if result.is_a?(PostProcessor)
@@ -431,12 +433,6 @@ module GraphQL
           if post_processors
             post_processors.each do |post_processor|
               @field_results = post_processor.after_resolve(@field_results)
-            end
-          end
-
-          finalizers&.each do |finalizer|
-            @field_results.each do |fr|
-              @runner.add_finalizer(fr, finalizer)
             end
           end
 
@@ -482,7 +478,7 @@ module GraphQL
             case ext
             when Schema::Field::ConnectionExtension
               conns = ctx.schema.connections
-              @field_results = @field_results.map.each_with_index do |value, idx|
+              @field_results.map!.each_with_index do |value, idx|
                 object = @extended.object[idx]
                 conn = conns.populate_connection(@field_definition, object, value, @arguments, ctx)
                 if conn
@@ -571,7 +567,7 @@ module GraphQL
                 field_result = nil
               end
               i += 1
-              result_h[@key] = if field_result.nil?
+              final_field_result = if field_result.nil?
                 if return_type.non_null?
                   add_non_null_error(false)
                 else
@@ -588,6 +584,9 @@ module GraphQL
                 # TODO `nil`s in [T!] types aren't handled
                 return_type.coerce_result(field_result, ctx)
               end
+
+              @directive_finalizers&.each { |f| @runner.add_finalizer(final_field_result, f) }
+              result_h[@key] = final_field_result
             end
           end
         end
@@ -649,8 +648,6 @@ module GraphQL
           @runner.schema.type_error(err, @selections_step.query.context)
         end
 
-        private
-
         def build_graphql_result(graphql_result, key, field_result, return_type, is_nn, is_list, is_from_array) # rubocop:disable Metrics/ParameterLists
           if field_result.nil?
             if is_nn
@@ -674,6 +671,7 @@ module GraphQL
             inner_type_nn = inner_type.non_null?
             inner_type_l = inner_type.list?
             list_result = graphql_result[key] = []
+            @directive_finalizers&.each { |f| @runner.add_finalizer(list_result, f) }
             i = 0
             s = field_result.size
             while i < s
@@ -703,9 +701,9 @@ module GraphQL
           else
             next_result_h = {}.compare_by_identity
             @all_next_results << next_result_h
+            @directive_finalizers&.each { |f| @runner.add_finalizer(next_result_h, f) }
             @all_next_objects << field_result
-            st = @runner.static_type_at
-            st[next_result_h] = @static_type
+            @runner.static_type_at[next_result_h] = @static_type
             graphql_result[key] = next_result_h
           end
         end

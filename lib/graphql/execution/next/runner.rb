@@ -105,7 +105,11 @@ module GraphQL
               root_type = query.root_type
               data = {}
 
-              beginning_path = EmptyObjects::EMPTY_ARRAY
+              beginning_path = query.path
+
+              if root_type.non_null?
+                root_type = root_type.of_type
+              end
 
               case root_type.kind.name
               when "OBJECT"
@@ -190,12 +194,12 @@ module GraphQL
                 inner_type = root_type.unwrap
                 case inner_type.kind.name
                 when "SCALAR", "ENUM"
-                  results << run_isolated_scalar(root_type, query.root_value, query.context)
+                  results << run_isolated_scalar(root_type, query)
                 else
                   raise "Not implemented list type: #{root_type.to_type_signature}"
                 end
               when "SCALAR", "ENUM"
-                results << run_isolated_scalar(root_type, query.root_value, query.context)
+                results << run_isolated_scalar(root_type, query)
               else
                 raise "Unhandled root type kind: #{root_type.kind.name.inspect}"
               end
@@ -225,6 +229,7 @@ module GraphQL
                 @schema.subscriptions.finish_subscriptions(query)
               end
 
+              p [idx, query.context.errors]
               fin_result = if @finalizers.empty? && query.context.errors.empty?
                 result
               else
@@ -343,11 +348,38 @@ module GraphQL
           end
         end
 
-        def run_isolated_scalar(type, value, context)
+        def run_isolated_scalar(type, partial)
+          value = partial.root_value
+          dummy_path = partial.path.dup
+          key = dummy_path.pop
+          frs_key = dummy_path.pop
+          is_list = type.kind.list?
+          is_from_array = key.is_a?(Integer)
+
           if lazy?(value)
             value = @schema.sync_lazy(value)
           end
-          { "data" => type.coerce_result(value, context) }
+          selections = partial.ast_nodes
+          dummy_ss = SelectionsStep.new(
+            parent_type: nil,
+            selections: selections,
+            objects: nil,
+            results: nil,
+            path: dummy_path,
+            runner: self,
+            query: partial,
+          )
+          dummy_frs = FieldResolveStep.new(
+            selections_step: dummy_ss,
+            key: key,
+            parent_type: nil,
+            runner: self,
+          )
+          selections.each { |s| dummy_frs.append_selection(s) }
+
+          result = is_from_array ? [] : {}
+          dummy_frs.build_graphql_result(result, key, value, type, false, is_list, is_from_array)
+          { "data" => result }
         end
       end
     end

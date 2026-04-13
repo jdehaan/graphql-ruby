@@ -9,8 +9,8 @@ module GraphQL
           @data = data
           @static_type_at = runner.static_type_at
           @runner = runner
-          @current_exec_path = []
-          @current_result_path = []
+          @current_exec_path = query.path.dup
+          @current_result_path = query.path.dup
           @finalizers = runner.finalizers
           query.context.errors.each do |err|
             @finalizers[err] = err
@@ -19,7 +19,13 @@ module GraphQL
 
         def run
           if (selected_operation = @query.selected_operation) && @data
-            check_object_result(@data, @query.root_type, selected_operation.selections)
+            if @data.is_a?(Hash)
+              check_object_result(@data, @query.root_type, selected_operation.selections)
+            elsif @data.is_a?(Array)
+              check_list_result(@data, @query.root_type, selected_operation.selections)
+            else
+              raise ArgumentError, "Unexpected @data: #{@data.inspect}"
+            end
           else
             @data
           end
@@ -53,6 +59,8 @@ module GraphQL
             when Language::Nodes::Field
               begin
                 key = ast_selection.alias || ast_selection.name
+                next if !result_h.key?(key)
+
                 @current_exec_path << key
                 @current_result_path << key
 
@@ -67,7 +75,7 @@ module GraphQL
                   run_finalizers(@current_result_path.dup, finalizer_or_finalizers, result_h, key)
                   result_h.key?(key) ? result_h[key] : :unassigned
                 else
-                  if result_type.list?
+                  if result_type.list? && result_value
                     check_list_result(result_value, result_type.of_type, ast_selection.selections)
                   elsif !result_type.kind.leaf? && result_value
                     check_object_result(result_value, result_type, ast_selection.selections)
@@ -125,7 +133,7 @@ module GraphQL
             new_result = if (f = @finalizers[result_item])
               run_finalizers(@current_result_path.dup, f, result_arr, idx)
               result_arr[idx] # TODO :unassigned?
-            elsif inner_type.list?
+            elsif inner_type.list? && result_item
               check_list_result(result_item, inner_type.of_type, ast_selections)
             elsif !inner_type.kind.leaf? && result_item
               check_object_result(result_item, inner_type, ast_selections)
