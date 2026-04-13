@@ -213,7 +213,7 @@ Use `locations(OBJECT)` to update this directive's definition, or remove it from
       field :dataloaded_thing, Thing, null: false, extras: [:ast_node], resolve_static: true
 
       def dataloaded_thing(ast_node:)
-        self.class.dataloaded_thing(context, ast_node:)
+        self.class.dataloaded_thing(context, ast_node: ast_node)
       end
 
       resolver_methods do

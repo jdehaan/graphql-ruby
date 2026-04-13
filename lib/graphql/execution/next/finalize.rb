@@ -54,7 +54,7 @@ module GraphQL
                 current_exec_path << key
                 current_result_path << key
 
-                result_value = result_h[key] || raise("Invariant: No result_h for #{current_exec_path} (#{result_h})")
+                result_value = result_h[key]
                 field_defn = @query.context.types.field(parent_type, ast_selection.name) || raise("Invariant: No field found for #{static_type.to_type_signature}.#{ast_selection.name}")
                 result_type = field_defn.type
                 if (result_type_non_null = result_type.non_null?)
