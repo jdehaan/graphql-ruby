@@ -66,7 +66,11 @@ module GraphQL
         # @return [void]
         def add_finalizer(result_value, finalizer)
           if (f = @finalizers[result_value])
-            f << finalizer
+            if f.is_a?(Array)
+              f << finalizer
+            else
+              @finalizers[result_value] = [f, finalizer]
+            end
           else
             @finalizers[result_value] = finalizer
           end

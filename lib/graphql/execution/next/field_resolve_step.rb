@@ -337,7 +337,6 @@ module GraphQL
             # TODO break this backwards compat somehow?
             objects = @selections_step.graphql_objects
           end
-
           if @runner.authorization && @runner.authorizes?(@field_definition, ctx)
             authorized_objects = []
             @object_is_authorized = objects.map { |o|
@@ -362,7 +361,6 @@ module GraphQL
             authorized_objects = objects
             @object_is_authorized = AlwaysAuthorized
           end
-
           if @parent_type.default_relay? && authorized_objects.all? { |o| o.respond_to?(:was_authorized_by_scope_items?) && o.was_authorized_by_scope_items? }
             @was_scoped = true
           end
