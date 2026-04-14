@@ -272,6 +272,7 @@ describe GraphQL::Query::Partial do
     assert_equal ["CheckCurrentValues", TESTING_EXEC_NEXT ? nil : "Query.currentValues", "nil"], res[0]["data"]["currentValues"]
   end
 
+
   it "returns errors if they occur" do
     str = "{
       farm1: farm(id: \"1\") { error }

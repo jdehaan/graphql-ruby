@@ -57,7 +57,7 @@ module GraphQL
                   if result.is_a?(Finalizer)
                     result.path = path
                     @results.each do |r|
-                      @runner.add_finalizer(r, result)
+                      @runner.add_finalizer(@query, r, nil, result)
                     end
                     if result.is_a?(HaltExecution)
                       continue_execution = false

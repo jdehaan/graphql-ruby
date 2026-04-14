@@ -9,7 +9,11 @@ module GraphQL
           @steps_queue = []
           @runtime_type_at = {}.compare_by_identity
           @static_type_at = {}.compare_by_identity
-          @finalizers = {}.compare_by_identity
+          @finalizers = Hash.new do |h, query|
+            h[query] = Hash.new do |h2, result_value|
+              h2[result_value] = {}.compare_by_identity
+            end.compare_by_identity
+          end.compare_by_identity
           @selected_operation = nil
           @dataloader = multiplex.context[:dataloader] ||= @schema.dataloader_class.new
           @resolves_lazies = @schema.resolves_lazies?
@@ -38,7 +42,7 @@ module GraphQL
           end
         end
 
-        attr_reader :runtime_directives, :uses_runtime_directives
+        attr_reader :runtime_directives, :uses_runtime_directives, :finalizer_keys
 
         def resolve_type(type, object, query)
           query.current_trace.begin_resolve_type(type, object, query.context)
@@ -64,15 +68,16 @@ module GraphQL
         attr_reader :authorization, :steps_queue, :schema, :variables, :dataloader, :resolves_lazies, :authorizes, :static_type_at, :runtime_type_at, :finalizers
 
         # @return [void]
-        def add_finalizer(result_value, finalizer)
-          if (f = @finalizers[result_value])
+        def add_finalizer(query, result_value, key, finalizer)
+          f_for_result = @finalizers[query][result_value]
+          if (f = f_for_result[key])
             if f.is_a?(Array)
               f << finalizer
             else
-              @finalizers[result_value] = [f, finalizer]
+              f_for_result[key] = [f, finalizer]
             end
           else
-            @finalizers[result_value] = finalizer
+            f_for_result[key] = finalizer
           end
           nil
         end
@@ -137,7 +142,7 @@ module GraphQL
                 @schema.subscriptions.finish_subscriptions(query)
               end
 
-              fin_result = if (@finalizers.empty? && query.context.errors.empty?) || !query.valid?
+              fin_result = if (!@finalizers.key?(query) && query.context.errors.empty?) || !query.valid?
                 result
               else
                 data = result["data"]
@@ -252,6 +257,7 @@ module GraphQL
                   new_val
                 rescue GraphQL::ExecutionError => ex_err
                   # The old runtime didn't add path and ast_nodes to this
+                  ex_err.path = beginning_path
                   query.context.add_error(ex_err)
                   nil
                 end

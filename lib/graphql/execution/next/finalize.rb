@@ -11,9 +11,31 @@ module GraphQL
           @runner = runner
           @current_exec_path = query.path.dup
           @current_result_path = query.path.dup
-          @finalizers = runner.finalizers
+          @finalizers = runner.finalizers[query]
+
+
           query.context.errors.each do |err|
-            @finalizers[err] = err
+            err_path = err.path - @current_exec_path
+            key = err_path.pop
+            targets = [data]
+            while (part = err_path.shift)
+              targets.map! { |t| t[part] }
+              targets.flatten!
+            end
+
+            targets.each_with_index do |target, idx|
+              if target.is_a?(Hash)
+                if target[key].equal?(err)
+                  @finalizers[target][key] = err
+                elsif (arr = target[key]).is_a?(Array)
+                  arr.each_with_index do |el, idx|
+                    if el.equal?(err)
+                      @finalizers[arr][idx] = err
+                    end
+                  end
+                end
+              end
+            end
           end
         end
 
@@ -46,13 +68,21 @@ module GraphQL
               f.finalize_graphql_result(@query, result_data, result_key)
             }
           else
-            finalizer_or_finalizers.path = result_path
-            finalizer_or_finalizers.finalize_graphql_result(@query, result_data, result_key)
+            f = finalizer_or_finalizers
+            f.path = result_path
+            f.finalize_graphql_result(@query, result_data, result_key)
+          end
+        end
+
+        def finalizers(result_value, key)
+          if @finalizers.key?(result_value)
+            @finalizers[result_value][key]
           end
         end
 
         def check_object_result(result_h, parent_type, ast_selections)
-          if (f = @finalizers[result_h])
+          if (f = finalizers(result_h, nil))
+            # TODO clean up dups -- dup in method instead
             run_finalizers(@current_result_path.dup, f, result_h, nil)
           end
 
@@ -63,30 +93,31 @@ module GraphQL
           ast_selections.each do |ast_selection|
             case ast_selection
             when Language::Nodes::Field
+              key = ast_selection.alias || ast_selection.name
+              if (f = finalizers(result_h, key))
+                result_value = result_h[key]
+                run_finalizers(@current_result_path.dup << key, f, result_h, key)
+                new_result_value = result_h.key?(key) ? result_h[key] : :unassigned
+              end
+              next if !(f || result_h.key?(key))
               begin
-                key = ast_selection.alias || ast_selection.name
-                next if !result_h.key?(key)
-
                 @current_exec_path << key
                 @current_result_path << key
 
-                result_value = result_h[key]
                 field_defn = @query.context.types.field(parent_type, ast_selection.name) || raise("Invariant: No field found for #{static_type.to_type_signature}.#{ast_selection.name}")
                 result_type = field_defn.type
                 if (result_type_non_null = result_type.non_null?)
                   result_type = result_type.of_type
                 end
 
-                new_result_value = if (finalizer_or_finalizers = @finalizers[result_value])
-                  run_finalizers(@current_result_path.dup, finalizer_or_finalizers, result_h, key)
-                  result_h.key?(key) ? result_h[key] : :unassigned
-                else
-                  if result_type.list? && result_value
+                if !f
+                  result_value = result_h[key]
+                  new_result_value = if result_type.list? && result_value
                     check_list_result(result_value, result_type.of_type, ast_selection.selections)
                   elsif !result_type.kind.leaf? && result_value
                     check_object_result(result_value, result_type, ast_selection.selections)
                   else
-                    new_result_value || result_value
+                    result_value
                   end
                 end
 
@@ -130,13 +161,13 @@ module GraphQL
 
           new_invalid_null = false
 
-          if (f = @finalizers[result_arr])
-            run_finalizers(current_result_path.dup, f, result_arr, nil)
+          if (f = finalizers(result_arr, nil))
+            run_finalizers(@current_result_path.dup, f, result_arr, nil)
           end
 
           result_arr.each_with_index do |result_item, idx|
             @current_result_path << idx
-            new_result = if (f = @finalizers[result_item])
+            new_result = if (f = finalizers(result_arr, idx))
               run_finalizers(@current_result_path.dup, f, result_arr, idx)
               result_arr[idx] # TODO :unassigned?
             elsif inner_type.list? && result_item

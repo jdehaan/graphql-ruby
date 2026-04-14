@@ -912,7 +912,7 @@ describe "GraphQL::Authorization" do
         unauth_res = auth_execute(query, context: { query_unauthorized: true })
 
         assert_equal({
-          "errors" => [{"message"=>"Unauthorized Query: nil"}],
+          "errors" => [(TESTING_EXEC_NEXT ? {"message"=>"Unauthorized Query: nil", "path" => [] } : {"message"=>"Unauthorized Query: nil"})],
           "data" => nil,
         }, unauth_res.to_h)
       end
