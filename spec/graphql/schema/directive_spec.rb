@@ -151,7 +151,7 @@ Use `locations(OBJECT)` to update this directive's definition, or remove it from
 
         def finalize_graphql_result(query, result_data, result_key)
           counts = query.context[:count_fields] ||= {}
-          counts[path] ||= [case @ast_node
+          count = case @ast_node
           when GraphQL::Language::Nodes::Field
             1
           when GraphQL::Language::Nodes::InlineFragment
@@ -161,7 +161,8 @@ Use `locations(OBJECT)` to update this directive's definition, or remove it from
             frag.selections.size
           else
             raise ArgumentError, "Unexpected ast_node: #{ast_node.inspect}"
-          end]
+          end
+          counts[path] ||= [count]
         end
       end
 
