@@ -101,11 +101,7 @@ module GraphQL
                 next
               end
 
-              selected_operation = query.selected_operation
               root_type = query.root_type
-              data = {}
-
-              beginning_path = query.path
 
               if root_type.non_null?
                 root_type = root_type.of_type
@@ -116,114 +112,7 @@ module GraphQL
                 root_value = schema.sync_lazy(root_value)
               end
 
-              case root_type.kind.name
-              when "OBJECT"
-                if self.authorization && authorizes?(root_type, query.context)
-                  query.current_trace.begin_authorized(root_type, root_value, query.context)
-                  auth_check = schema.sync_lazy(root_type.authorized?(root_value, query.context))
-                  query.current_trace.end_authorized(root_type, root_value, query.context, auth_check)
-                  root_value = if auth_check
-                    root_value
-                  else
-                    begin
-                      auth_err = GraphQL::UnauthorizedError.new(object: root_value, type: root_type, context: query.context)
-                      new_val = schema.unauthorized_object(auth_err)
-                      if new_val
-                        auth_check = true
-                      end
-                      new_val
-                    rescue GraphQL::ExecutionError => ex_err
-                      # The old runtime didn't add path and ast_nodes to this
-                      query.context.add_error(ex_err)
-                      nil
-                    end
-                  end
-
-                  if !auth_check
-                    results << {}
-                    next
-                  end
-                end
-
-                results << { "data" => data }
-
-                if query.query?
-                  isolated_steps[0] << SelectionsStep.new(
-                    parent_type: root_type,
-                    selections: query.selected_operation.selections,
-                    objects: [root_value],
-                    results: [data],
-                    path: beginning_path,
-                    runner: self,
-                    query: query,
-                  )
-                elsif query.mutation?
-                  fields = {}
-                  all_selections = [fields, (prototype_result = {})]
-                  gather_selections(root_type, selected_operation.selections, nil, query, all_selections, prototype_result, into: fields)
-                  if all_selections.length > 2
-                    # TODO DRY with SelectionsStep with directive handling
-                    raise "Directives on root mutation type not implemented yet"
-                  end
-                  fields.each_value do |field_resolve_step|
-                    isolated_steps << [SelectionsStep.new(
-                      clobber: false, # `data` is being shared among several selections steps
-                      parent_type: root_type,
-                      selections: field_resolve_step.ast_nodes || Array(field_resolve_step.ast_node),
-                      objects: [root_value],
-                      results: [data],
-                      path: beginning_path,
-                      runner: self,
-                      query: query,
-                    )]
-                  end
-                elsif query.subscription?
-                  if !query.subscription_update?
-                    schema.subscriptions.initialize_subscriptions(query)
-                  end
-                  isolated_steps[0] << SelectionsStep.new(
-                    parent_type: root_type,
-                    selections: selected_operation.selections,
-                    objects: [root_value],
-                    results: [data],
-                    path: beginning_path,
-                    runner: self,
-                    query: query,
-                  )
-                else
-                  raise ArgumentError, "Unknown operation type (not query, mutation or subscription): #{query.query_string}"
-                end
-              when "UNION", "INTERFACE"
-                resolved_type = resolve_type(root_type, root_value, query)
-                if resolves_lazies
-                  resolved_type = schema.sync_lazy(resolved_type)
-                end
-                runtime_type_at[data] = resolved_type
-                results << { "data" => data }
-                isolated_steps[0] << SelectionsStep.new(
-                  parent_type: resolved_type,
-                  selections: query.selected_operation.selections,
-                  objects: [root_value],
-                  results: [data],
-                  path: beginning_path,
-                  runner: self,
-                  query: query,
-                )
-              when "LIST"
-                inner_type = root_type.unwrap
-                case inner_type.kind.name
-                when "SCALAR", "ENUM"
-                  results << run_isolated_scalar(root_type, query)
-                else
-                  raise "Not implemented list type: #{root_type.to_type_signature}"
-                end
-              when "SCALAR", "ENUM"
-                results << run_isolated_scalar(root_type, query)
-              else
-                raise "Unhandled root type kind: #{root_type.kind.name.inspect}"
-              end
-
-              @static_type_at[data] = root_type
+              begin_execute(isolated_steps, results, query, root_type, root_value)
 
               # TODO This is stupid but makes multiplex_spec.rb pass
               trace.execute_query(query: query) do
@@ -248,7 +137,7 @@ module GraphQL
                 @schema.subscriptions.finish_subscriptions(query)
               end
 
-              fin_result = if @finalizers.empty? && query.context.errors.empty?
+              fin_result = if (@finalizers.empty? && query.context.errors.empty?) || !query.valid?
                 result
               else
                 data = result["data"]
@@ -339,6 +228,131 @@ module GraphQL
         end
 
         private
+
+        def begin_execute(isolated_steps, results, query, root_type, root_value)
+          data = {}
+          selected_operation = query.selected_operation
+          beginning_path = query.path
+
+          case root_type.kind.name
+          when "OBJECT"
+            if self.authorization && authorizes?(root_type, query.context)
+              query.current_trace.begin_authorized(root_type, root_value, query.context)
+              auth_check = schema.sync_lazy(root_type.authorized?(root_value, query.context))
+              query.current_trace.end_authorized(root_type, root_value, query.context, auth_check)
+              root_value = if auth_check
+                root_value
+              else
+                begin
+                  auth_err = GraphQL::UnauthorizedError.new(object: root_value, type: root_type, context: query.context)
+                  new_val = schema.unauthorized_object(auth_err)
+                  if new_val
+                    auth_check = true
+                  end
+                  new_val
+                rescue GraphQL::ExecutionError => ex_err
+                  # The old runtime didn't add path and ast_nodes to this
+                  query.context.add_error(ex_err)
+                  nil
+                end
+              end
+
+              if !auth_check
+                results << {}
+                return
+              end
+            end
+
+            results << { "data" => data }
+
+            if query.query?
+              isolated_steps[0] << SelectionsStep.new(
+                parent_type: root_type,
+                selections: query.selected_operation.selections,
+                objects: [root_value],
+                results: [data],
+                path: beginning_path,
+                runner: self,
+                query: query,
+              )
+            elsif query.mutation?
+              fields = {}
+              all_selections = [fields, (prototype_result = {})]
+              gather_selections(root_type, selected_operation.selections, nil, query, all_selections, prototype_result, into: fields)
+              if all_selections.length > 2
+                # TODO DRY with SelectionsStep with directive handling
+                raise "Directives on root mutation type not implemented yet"
+              end
+              fields.each_value do |field_resolve_step|
+                isolated_steps << [SelectionsStep.new(
+                  clobber: false, # `data` is being shared among several selections steps
+                  parent_type: root_type,
+                  selections: field_resolve_step.ast_nodes || Array(field_resolve_step.ast_node),
+                  objects: [root_value],
+                  results: [data],
+                  path: beginning_path,
+                  runner: self,
+                  query: query,
+                )]
+              end
+            elsif query.subscription?
+              if !query.subscription_update?
+                schema.subscriptions.initialize_subscriptions(query)
+              end
+              isolated_steps[0] << SelectionsStep.new(
+                parent_type: root_type,
+                selections: selected_operation.selections,
+                objects: [root_value],
+                results: [data],
+                path: beginning_path,
+                runner: self,
+                query: query,
+              )
+            else
+              raise ArgumentError, "Unknown operation type (not query, mutation or subscription): #{query.query_string}"
+            end
+          when "UNION", "INTERFACE"
+            resolved_type = resolve_type(root_type, root_value, query)
+            if resolves_lazies
+              resolved_type = schema.sync_lazy(resolved_type)
+            end
+            runtime_type_at[data] = resolved_type
+            results << { "data" => data }
+            isolated_steps[0] << SelectionsStep.new(
+              parent_type: resolved_type,
+              selections: query.selected_operation.selections,
+              objects: [root_value],
+              results: [data],
+              path: beginning_path,
+              runner: self,
+              query: query,
+            )
+          when "LIST"
+            inner_type = root_type.unwrap
+            case inner_type.kind.name
+            when "SCALAR", "ENUM"
+              results << run_isolated_scalar(root_type, query)
+            else
+              list_result = Array.new(root_value.size) { Hash.new.compare_by_identity }
+              results << { "data" => list_result }
+              isolated_steps[0] << SelectionsStep.new(
+                parent_type: inner_type,
+                selections: query.selected_operation.selections,
+                objects: root_value,
+                results: list_result,
+                path: beginning_path,
+                runner: self,
+                query: query,
+              )
+            end
+          when "SCALAR", "ENUM"
+            results << run_isolated_scalar(root_type, query)
+          else
+            raise "Unhandled root type kind: #{root_type.kind.name.inspect}"
+          end
+
+          @static_type_at[data] = root_type
+        end
 
         def dir_arg_value(query, arg_node)
           if arg_node.value.is_a?(Language::Nodes::VariableIdentifier)
