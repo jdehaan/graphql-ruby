@@ -23,6 +23,12 @@ module GraphQL
               check_object_result(@data, @query.root_type, selected_operation.selections)
             elsif @data.is_a?(Array)
               check_list_result(@data, @query.root_type, selected_operation.selections)
+            elsif @data.is_a?(Finalizer)
+              dummy_data = {}
+              dummy_key = "__dummy"
+              @data.path = @query.path
+              @data.finalize_graphql_result(@query, dummy_data, dummy_key)
+              dummy_data[dummy_key]
             else
               raise ArgumentError, "Unexpected @data: #{@data.inspect}"
             end

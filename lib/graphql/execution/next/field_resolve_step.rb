@@ -28,7 +28,7 @@ module GraphQL
         attr_reader :ast_node, :key, :parent_type, :selections_step, :runner,
           :field_definition, :object_is_authorized, :was_scoped, :field_results
 
-        attr_accessor :pending_steps, :arguments
+        attr_accessor :pending_steps, :arguments, :static_type
 
         def path
           @path ||= [*@selections_step.path, @key].freeze
@@ -265,7 +265,6 @@ module GraphQL
         end
 
         def add_graphql_error(err)
-          p [:add_error, err, path, ast_nodes&.map(&:class)]
           err.path = path
           err.ast_nodes = ast_nodes
           @selections_step.query.context.add_error(err)
@@ -371,7 +370,7 @@ module GraphQL
 
           if @runner.uses_runtime_directives
             if @ast_nodes.nil? || @ast_nodes.size == 1
-              directives = if @ast_node.directives.any?
+              directives = if !@ast_node.directives.empty?
                 @ast_node.directives
               else
                 nil
@@ -392,7 +391,7 @@ module GraphQL
                 if (dir_defn = @runner.runtime_directives[dir_node.name])
                   # TODO: `coerce_arguments` modifies self, assuming it's field arguments. Extract to pure function for use
                   # here and with fragments.
-                  dir_args = coerce_arguments(dir_defn, dir_node.arguments, false)
+                  dir_args = coerce_arguments(dir_defn, dir_node.arguments, false) # rubocop:disable Development/ContextIsPassedCop
                   result = dir_defn.resolve_field(ast_nodes, @parent_type, field_definition, authorized_objects, dir_args, ctx)
                   if !result.nil?
                     if result.is_a?(Finalizer)
@@ -567,28 +566,32 @@ module GraphQL
                 field_result = nil
               end
               i += 1
-              final_field_result = if field_result.nil?
-                if return_type.non_null?
-                  add_non_null_error(false)
-                else
-                  nil
-                end
-              elsif field_result.is_a?(Finalizer)
-                if field_result.is_a?(GraphQL::RuntimeError)
-                  add_graphql_error(field_result)
-                else
-                  field_result.path = path
-                  @runner.add_finalizer(field_result, field_result)
-                end
-              else
-                # TODO `nil`s in [T!] types aren't handled
-                return_type.coerce_result(field_result, ctx)
-              end
-
-              @directive_finalizers&.each { |f| @runner.add_finalizer(final_field_result, f) }
-              result_h[@key] = final_field_result
+              finish_leaf_result(result_h, @key, field_result, return_type, ctx)
             end
           end
+        end
+
+        def finish_leaf_result(result_h, key, field_result, return_type, ctx)
+          final_field_result = if field_result.nil?
+            if return_type.non_null?
+              add_non_null_error(false)
+            else
+              nil
+            end
+          elsif field_result.is_a?(Finalizer)
+            if field_result.is_a?(GraphQL::RuntimeError)
+              add_graphql_error(field_result)
+            else
+              field_result.path = path
+              @runner.add_finalizer(field_result, field_result)
+            end
+          else
+            # TODO `nil`s in [T!] types aren't handled
+            return_type.coerce_result(field_result, ctx)
+          end
+
+          @directive_finalizers&.each { |f| @runner.add_finalizer(final_field_result, f) }
+          result_h[@key] = final_field_result
         end
 
         def enqueue_next_steps
@@ -648,6 +651,8 @@ module GraphQL
           @runner.schema.type_error(err, @selections_step.query.context)
         end
 
+        private
+
         def build_graphql_result(graphql_result, key, field_result, return_type, is_nn, is_list, is_from_array) # rubocop:disable Metrics/ParameterLists
           if field_result.nil?
             if is_nn
@@ -684,7 +689,6 @@ module GraphQL
                 ) && @runner.authorizes?(runtime_type, @selections_step.query.context)
               )))
             obj_step = PrepareObjectStep.new(
-              static_type: @static_type,
               object: field_result,
               runner: @runner,
               field_resolve_step: self,

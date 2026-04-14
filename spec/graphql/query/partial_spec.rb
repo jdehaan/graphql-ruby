@@ -45,7 +45,7 @@ describe GraphQL::Query::Partial do
 
     module Entity
       include GraphQL::Schema::Interface
-      field :name, String, resolve_each: true
+      field :name, String
     end
 
     class Farm < GraphQL::Schema::Object
@@ -113,7 +113,11 @@ describe GraphQL::Query::Partial do
 
       field :farm_names, [String], fallback_value: Database::FARMS.each_value.map(&:name)
 
-      field :query, Query, fallback_value: true
+      field :query, Query, fallback_value: true, resolve_static: true
+
+      def self.query(_ctx)
+        true
+      end
 
       field :thing, Thing, resolve_static: true
 
@@ -155,7 +159,7 @@ describe GraphQL::Query::Partial do
       def self.current_values(context)
         [
           GraphQL::Current.operation_name,
-          GraphQL::Current.field.path,
+          GraphQL::Current.field&.path,
           GraphQL::Current.dataloader_source_class.inspect,
         ]
       end
@@ -265,7 +269,7 @@ describe GraphQL::Query::Partial do
 
   it "works with GraphQL::Current" do
     res = run_partials("query CheckCurrentValues { query { currentValues } }", [path: ["query"], object: nil])
-    assert_equal ["CheckCurrentValues", "Query.currentValues", "nil"], res[0]["data"]["currentValues"]
+    assert_equal ["CheckCurrentValues", TESTING_EXEC_NEXT ? nil : "Query.currentValues", "nil"], res[0]["data"]["currentValues"]
   end
 
   it "returns errors if they occur" do
@@ -363,7 +367,7 @@ describe GraphQL::Query::Partial do
     assert_equal "Twenty Paces", results[0]["data"]
     assert_equal "Caromont", results[1]["data"]
     assert_equal({
-      "errors" => [{"message" => "Boom!", "locations" => [{"line" => 1, "column" => 11}], "path" => ["query", "farmNames", 2, "farmNames"]}],
+      "errors" => [{"message" => "Boom!", "locations" => [{"line" => 1, "column" => 11}], "path" => ["query", "farmNames", 2, TESTING_EXEC_NEXT ? nil : "farmNames"].compact}],
       "data" => nil
     }, results[2])
   end
@@ -431,8 +435,8 @@ describe GraphQL::Query::Partial do
     }"
 
     results = run_partials(str, [
-      { path: ["thing"], object: { name: "Whisper Hill" } },
-      { path: ["thing"], object: { is_market: true, name: "Crozet Farmers Market", is_year_round: false } },
+      { path: ["thing"], object: OpenStruct.new({ name: "Whisper Hill" }) },
+      { path: ["thing"], object: OpenStruct.new({ is_market: true, name: "Crozet Farmers Market", is_year_round: false })},
     ])
 
     assert_equal({ "name" => "Whisper Hill" }, results[0]["data"])
@@ -448,8 +452,8 @@ describe GraphQL::Query::Partial do
     }"
 
     results = run_partials(str, [
-      { path: ["entity"], object: { name: "Whisper Hill" } },
-      { path: ["entity"], object: { is_market: true, name: "Crozet Farmers Market" } },
+      { path: ["entity"], object: OpenStruct.new({ name: "Whisper Hill" }) },
+      { path: ["entity"], object: OpenStruct.new({ is_market: true, name: "Crozet Farmers Market" }) },
     ])
 
     assert_equal({ "name" => "Whisper Hill", "__typename" => "Farm" }, results[0]["data"])
@@ -496,11 +500,14 @@ describe GraphQL::Query::Partial do
       { path: ["q1", "q2", "query", "currentPath"], object: ["injected", "path"] },
     ])
 
-    assert_equal({"q1" => { "q2" => { "query" => { "currentPath" => ["q1", "q2", "query", "currentPath"] } } } }, results[0]["data"])
+    # No current path in exec-next
+    expected_path = TESTING_EXEC_NEXT ? nil : ["q1", "q2", "query", "currentPath"]
+
+    assert_equal({"q1" => { "q2" => { "query" => { "currentPath" => expected_path } } } }, results[0]["data"])
     assert_equal [], results[0].partial.path
-    assert_equal({"query" => {"currentPath" => ["q1", "q2", "query", "currentPath"]}}, results[1]["data"])
+    assert_equal({"query" => {"currentPath" => expected_path } }, results[1]["data"])
     assert_equal ["q1", "q2"], results[1].partial.path
-    assert_equal({ "currentPath" => ["q1", "q2", "query", "currentPath"] }, results[2]["data"])
+    assert_equal({ "currentPath" => expected_path }, results[2]["data"])
     assert_equal ["q1", "q2", "query"], results[2].partial.path
     assert_equal(["injected", "path"], results[3]["data"])
     assert_equal ["q1", "q2", "query", "currentPath"], results[3].partial.path
@@ -528,7 +535,7 @@ describe GraphQL::Query::Partial do
     }"
 
     results = run_partials(str, [
-      { path: ["entity"], object: { name: GraphQL::ExecutionError.new("Boom!") } },
+      { path: ["entity"], object: OpenStruct.new({ name: GraphQL::ExecutionError.new("Boom!") }) },
       { path: ["entity", "name"], object: GraphQL::ExecutionError.new("Bang!") },
       { path: ["entity", "name"], object: -> { GraphQL::ExecutionError.new("Blorp!") } },
     ])
@@ -538,11 +545,11 @@ describe GraphQL::Query::Partial do
       "data" => { "name" => nil, "__typename" => "Farm" }
     }, results[0])
     assert_equal({
-      "errors" => [{"message" => "Bang!", "locations" => [{"line" => 3, "column" => 9}], "path" => ["entity", "name", "name"]}],
+      "errors" => [{"message" => "Bang!", "locations" => [{"line" => 3, "column" => 9}], "path" => ["entity", "name", TESTING_EXEC_NEXT ? nil : "name"].compact}],
       "data" => nil
     }, results[1])
     assert_equal({
-      "errors" => [{"message" => "Blorp!", "locations" => [{"line" => 3, "column" => 9}], "path" => ["entity", "name", "name"]}],
+      "errors" => [{"message" => "Blorp!", "locations" => [{"line" => 3, "column" => 9}], "path" => ["entity", "name",  TESTING_EXEC_NEXT ? nil : "name" ].compact}],
       "data" => nil
     }, results[2])
   end

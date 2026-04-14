@@ -111,17 +111,22 @@ module GraphQL
                 root_type = root_type.of_type
               end
 
+              root_value = query.root_value
+              if resolves_lazies
+                root_value = schema.sync_lazy(root_value)
+              end
+
               case root_type.kind.name
               when "OBJECT"
                 if self.authorization && authorizes?(root_type, query.context)
-                  query.current_trace.begin_authorized(root_type, query.root_value, query.context)
-                  auth_check = schema.sync_lazy(root_type.authorized?(query.root_value, query.context))
-                  query.current_trace.end_authorized(root_type, query.root_value, query.context, auth_check)
+                  query.current_trace.begin_authorized(root_type, root_value, query.context)
+                  auth_check = schema.sync_lazy(root_type.authorized?(root_value, query.context))
+                  query.current_trace.end_authorized(root_type, root_value, query.context, auth_check)
                   root_value = if auth_check
-                    query.root_value
+                    root_value
                   else
                     begin
-                      auth_err = GraphQL::UnauthorizedError.new(object: query.root_value, type: root_type, context: query.context)
+                      auth_err = GraphQL::UnauthorizedError.new(object: root_value, type: root_type, context: query.context)
                       new_val = schema.unauthorized_object(auth_err)
                       if new_val
                         auth_check = true
@@ -138,8 +143,6 @@ module GraphQL
                     results << {}
                     next
                   end
-                else
-                  root_value = query.root_value
                 end
 
                 results << { "data" => data }
@@ -147,7 +150,7 @@ module GraphQL
                 if query.query?
                   isolated_steps[0] << SelectionsStep.new(
                     parent_type: root_type,
-                    selections: selected_operation.selections,
+                    selections: query.selected_operation.selections,
                     objects: [root_value],
                     results: [data],
                     path: beginning_path,
@@ -190,6 +193,22 @@ module GraphQL
                 else
                   raise ArgumentError, "Unknown operation type (not query, mutation or subscription): #{query.query_string}"
                 end
+              when "UNION", "INTERFACE"
+                resolved_type = resolve_type(root_type, root_value, query)
+                if resolves_lazies
+                  resolved_type = schema.sync_lazy(resolved_type)
+                end
+                runtime_type_at[data] = resolved_type
+                results << { "data" => data }
+                isolated_steps[0] << SelectionsStep.new(
+                  parent_type: resolved_type,
+                  selections: query.selected_operation.selections,
+                  objects: [root_value],
+                  results: [data],
+                  path: beginning_path,
+                  runner: self,
+                  query: query,
+                )
               when "LIST"
                 inner_type = root_type.unwrap
                 case inner_type.kind.name
@@ -229,7 +248,6 @@ module GraphQL
                 @schema.subscriptions.finish_subscriptions(query)
               end
 
-              p [idx, query.context.errors]
               fin_result = if @finalizers.empty? && query.context.errors.empty?
                 result
               else
@@ -278,7 +296,7 @@ module GraphQL
             when GraphQL::Language::Nodes::InlineFragment
               type_condition = ast_selection.type&.name
               if type_condition.nil? || type_condition_applies?(query.context, type_defn, type_condition)
-                if uses_runtime_directives && ast_selection.directives.any?
+                if uses_runtime_directives && !ast_selection.directives.empty?
                   all_selections << (into = { __node: ast_selection })
                   all_selections << (prototype_result = {})
                 end
@@ -288,7 +306,7 @@ module GraphQL
               fragment_definition = query.fragments[ast_selection.name]
               type_condition = fragment_definition.type.name
               if type_condition_applies?(query.context, type_defn, type_condition)
-                if uses_runtime_directives && ast_selection.directives.any?
+                if uses_runtime_directives && !ast_selection.directives.empty?
                   all_selections << (into = { __node: ast_selection })
                   all_selections << (prototype_result = {})
                 end
@@ -352,8 +370,6 @@ module GraphQL
           value = partial.root_value
           dummy_path = partial.path.dup
           key = dummy_path.pop
-          frs_key = dummy_path.pop
-          is_list = type.kind.list?
           is_from_array = key.is_a?(Integer)
 
           if lazy?(value)
@@ -375,11 +391,12 @@ module GraphQL
             parent_type: nil,
             runner: self,
           )
+          dummy_frs.static_type = type
           selections.each { |s| dummy_frs.append_selection(s) }
 
           result = is_from_array ? [] : {}
-          dummy_frs.build_graphql_result(result, key, value, type, false, is_list, is_from_array)
-          { "data" => result }
+          dummy_frs.finish_leaf_result(result, key, value, type, partial.context)
+          { "data" => result[key] }
         end
       end
     end

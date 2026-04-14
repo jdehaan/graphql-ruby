@@ -45,7 +45,7 @@ module GraphQL
                     parent_type: @parent_type,
                     runner: @runner,
                   )
-                  dir_args = dummy_frs.coerce_arguments(dir_defn, dir_node.arguments, false)
+                  dir_args = dummy_frs.coerce_arguments(dir_defn, dir_node.arguments, false) # rubocop:disable Development/ContextIsPassedCop
                   result = case directives_owner
                   when Language::Nodes::FragmentSpread
                     dir_defn.resolve_fragment_spread(directives_owner, @parent_type, @objects, dir_args, self.query.context)
