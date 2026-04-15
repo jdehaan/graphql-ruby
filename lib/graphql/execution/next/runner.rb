@@ -115,22 +115,18 @@ module GraphQL
                 root_value = schema.sync_lazy(root_value)
               end
 
-              begin_execute(isolated_steps, results, query, root_type, root_value)
-
-              # TODO This is stupid but makes multiplex_spec.rb pass
               trace.execute_query(query: query) do
+                begin_execute(isolated_steps, results, query, root_type, root_value)
               end
             end
 
-            while (next_isolated_steps = isolated_steps.shift)
-              next_isolated_steps.each do |step|
-                add_step(step)
-              end
-              @dataloader.run
-            end
-
-            # TODO This is stupid but makes multiplex_spec.rb pass
             trace.execute_query_lazy(query: nil, multiplex: @multiplex) do
+              while (next_isolated_steps = isolated_steps.shift)
+                next_isolated_steps.each do |step|
+                  add_step(step)
+                end
+                @dataloader.run
+              end
             end
 
             queries.each_with_index.map do |query, idx|
