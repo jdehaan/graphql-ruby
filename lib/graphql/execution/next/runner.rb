@@ -9,11 +9,7 @@ module GraphQL
           @steps_queue = []
           @runtime_type_at = {}.compare_by_identity
           @static_type_at = {}.compare_by_identity
-          @finalizers = Hash.new do |h, query|
-            h[query] = Hash.new do |h2, result_value|
-              h2[result_value] = {}.compare_by_identity
-            end.compare_by_identity
-          end.compare_by_identity
+          @finalizers = nil
           @selected_operation = nil
           @dataloader = multiplex.context[:dataloader] ||= @schema.dataloader_class.new
           @resolves_lazies = @schema.resolves_lazies?
@@ -69,7 +65,9 @@ module GraphQL
 
         # @return [void]
         def add_finalizer(query, result_value, key, finalizer)
-          f_for_result = @finalizers[query][result_value]
+          @finalizers ||= {}.compare_by_identity
+          f_for_query = @finalizers[query] ||= {}.compare_by_identity
+          f_for_result = f_for_query[result_value] ||= {}.compare_by_identity
           if (f = f_for_result[key])
             if f.is_a?(Array)
               f << finalizer
@@ -142,7 +140,7 @@ module GraphQL
                 @schema.subscriptions.finish_subscriptions(query)
               end
 
-              fin_result = if (!@finalizers.key?(query) && query.context.errors.empty?) || !query.valid?
+              fin_result = if (!@finalizers&.key?(query) && query.context.errors.empty?) || !query.valid?
                 result
               else
                 data = result["data"]

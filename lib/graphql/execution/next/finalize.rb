@@ -11,8 +11,7 @@ module GraphQL
           @runner = runner
           @current_exec_path = query.path.dup
           @current_result_path = query.path.dup
-          @finalizers = runner.finalizers[query]
-
+          @finalizers = runner.finalizers ? runner.finalizers[query] : {}.compare_by_identity
 
           query.context.errors.each do |err|
             err_path = err.path - @current_exec_path
@@ -26,11 +25,13 @@ module GraphQL
             targets.each_with_index do |target, idx|
               if target.is_a?(Hash)
                 if target[key].equal?(err)
-                  @finalizers[target][key] = err
+                  tf = @finalizers[target] ||= {}.compare_by_identity
+                  tf[key] = err
                 elsif (arr = target[key]).is_a?(Array)
                   arr.each_with_index do |el, idx|
                     if el.equal?(err)
-                      @finalizers[arr][idx] = err
+                      tf = @finalizers[arr] ||= {}.compare_by_identity
+                      tf[idx] = err
                     end
                   end
                 end
@@ -75,9 +76,8 @@ module GraphQL
         end
 
         def finalizers(result_value, key)
-          if @finalizers.key?(result_value)
-            @finalizers[result_value][key]
-          end
+          finalizers_for_value = @finalizers[result_value]
+          finalizers_for_value && finalizers_for_value[key]
         end
 
         def check_object_result(result_h, parent_type, ast_selections)
