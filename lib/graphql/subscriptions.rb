@@ -259,6 +259,21 @@ module GraphQL
       nil
     end
 
+    def finalizer
+      Finalizer.new(self)
+    end
+
+    class Finalizer
+      include Execution::Next::Finalizer
+      def initialize(subscriptions)
+        @subscriptions = subscriptions
+      end
+
+      def finalize_graphql_result(query, result_data, result_key)
+        @subscriptions.finish_subscriptions(query)
+      end
+    end
+
     private
 
     # Recursively normalize `args` as belonging to `arg_owner`:

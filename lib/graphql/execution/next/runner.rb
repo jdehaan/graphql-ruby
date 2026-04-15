@@ -135,10 +135,6 @@ module GraphQL
 
             queries.each_with_index.map do |query, idx|
               result = results[idx]
-              if query.subscription?
-                # TODO move this to a finalizer
-                @schema.subscriptions.finish_subscriptions(query)
-              end
 
               fin_result = if (!@finalizers&.key?(query) && query.context.errors.empty?) || !query.valid?
                 result
@@ -302,6 +298,7 @@ module GraphQL
             elsif query.subscription?
               if !query.subscription_update?
                 schema.subscriptions.initialize_subscriptions(query)
+                add_finalizer(query, data, nil, schema.subscriptions.finalizer)
               end
               isolated_steps[0] << SelectionsStep.new(
                 parent_type: root_type,
