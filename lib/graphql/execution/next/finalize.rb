@@ -3,7 +3,6 @@ module GraphQL
   module Execution
     module Next
       class Finalize
-        # TODO early-return when no more finalizers to run?
         def initialize(query, data, runner)
           @query = query
           @data = data
@@ -12,6 +11,17 @@ module GraphQL
           @current_exec_path = query.path.dup
           @current_result_path = query.path.dup
           @finalizers = runner.finalizers ? runner.finalizers[query] : {}.compare_by_identity
+          @finalizers_count = 0
+          @finalizers.each do |key, values|
+            values.each do |key2, values2|
+              case values2
+              when Array
+                @finalizers_count += values2.size
+              else
+                @finalizers_count += 1
+              end
+            end
+          end
 
           query.context.errors.each do |err|
             err_path = err.path - @current_exec_path
@@ -27,11 +37,13 @@ module GraphQL
                 if target[key].equal?(err)
                   tf = @finalizers[target] ||= {}.compare_by_identity
                   tf[key] = err
+                  @finalizers_count += 1
                 elsif (arr = target[key]).is_a?(Array)
                   arr.each_with_index do |el, idx|
                     if el.equal?(err)
                       tf = @finalizers[arr] ||= {}.compare_by_identity
                       tf[idx] = err
+                      @finalizers_count += 1
                     end
                   end
                 end
@@ -68,10 +80,12 @@ module GraphQL
               f.path = result_path
               f.finalize_graphql_result(@query, result_data, result_key)
             }
+            @finalizers_count -= finalizer_or_finalizers.size
           else
             f = finalizer_or_finalizers
             f.path = result_path
             f.finalize_graphql_result(@query, result_data, result_key)
+            @finalizers_count -= 1
           end
         end
 
@@ -82,8 +96,8 @@ module GraphQL
 
         def check_object_result(result_h, parent_type, ast_selections)
           if (f = finalizers(result_h, nil))
-            # TODO clean up dups -- dup in method instead
             run_finalizers(@current_result_path.dup, f, result_h, nil)
+            return result_h if @finalizers_count == 0
           end
 
           if parent_type.kind.abstract?
@@ -125,8 +139,10 @@ module GraphQL
                   return nil
                 elsif :unassigned.equal?(new_result_value)
                   # Do nothing
+                  break if @finalizers_count == 0
                 elsif !new_result_value.equal?(result_value)
                   result_h[key] = new_result_value
+                  break if @finalizers_count == 0
                 end
               ensure
                 @current_exec_path.pop
@@ -163,13 +179,14 @@ module GraphQL
 
           if (f = finalizers(result_arr, nil))
             run_finalizers(@current_result_path.dup, f, result_arr, nil)
+            return result_arr if @finalizers_count == 0
           end
 
           result_arr.each_with_index do |result_item, idx|
             @current_result_path << idx
             new_result = if (f = finalizers(result_arr, idx))
               run_finalizers(@current_result_path.dup, f, result_arr, idx)
-              result_arr[idx] # TODO :unassigned?
+              result_arr[idx]
             elsif inner_type.list? && result_item
               check_list_result(result_item, inner_type.of_type, ast_selections)
             elsif !inner_type.kind.leaf? && result_item
@@ -181,8 +198,10 @@ module GraphQL
             if new_result.nil? && inner_type_non_null
               new_invalid_null = true
               result_arr[idx] = nil
+              break if @finalizers_count == 0
             elsif !new_result.equal?(result_item)
               result_arr[idx] = new_result
+              break if @finalizers_count == 0
             end
           ensure
             @current_result_path.pop
