@@ -36,6 +36,8 @@ module Cop
         :execute_query,
         :execute_query_lazy,
         :lex,
+        :object_loaded,
+        :objects,
         :parse,
         :resolve_type,
         :resolve_type_lazy,

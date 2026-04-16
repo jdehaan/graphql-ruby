@@ -261,11 +261,14 @@ module GraphQL
 
             results << { "data" => data }
 
+            objects = [root_value]
+            query.current_trace.objects(root_type, objects, query.context)
+
             if query.query?
               isolated_steps[0] << SelectionsStep.new(
                 parent_type: root_type,
                 selections: query.selected_operation.selections,
-                objects: [root_value],
+                objects: objects,
                 results: [data],
                 path: beginning_path,
                 runner: self,
@@ -284,7 +287,7 @@ module GraphQL
                   clobber: false, # `data` is being shared among several selections steps
                   parent_type: root_type,
                   selections: field_resolve_step.ast_nodes || Array(field_resolve_step.ast_node),
-                  objects: [root_value],
+                  objects: objects,
                   results: [data],
                   path: beginning_path,
                   runner: self,
@@ -299,7 +302,7 @@ module GraphQL
               isolated_steps[0] << SelectionsStep.new(
                 parent_type: root_type,
                 selections: selected_operation.selections,
-                objects: [root_value],
+                objects: objects,
                 results: [data],
                 path: beginning_path,
                 runner: self,
@@ -318,7 +321,7 @@ module GraphQL
             isolated_steps[0] << SelectionsStep.new(
               parent_type: resolved_type,
               selections: query.selected_operation.selections,
-              objects: [root_value],
+              objects: objects,
               results: [data],
               path: beginning_path,
               runner: self,

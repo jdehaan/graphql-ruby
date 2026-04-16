@@ -598,6 +598,8 @@ module GraphQL
           if !@all_next_results.empty?
             @all_next_objects.compact!
 
+            query = @selections_step.query
+            ctx = query.context
             if @static_type.kind.abstract?
               next_objects_by_type = Hash.new { |h, obj_t| h[obj_t] = [] }.compare_by_identity
               next_results_by_type = Hash.new { |h, obj_t| h[obj_t] = [] }.compare_by_identity
@@ -607,7 +609,7 @@ module GraphQL
                 if (object_type = @runner.runtime_type_at[result])
                   # OK
                 else
-                  object_type = @runner.resolve_type(@static_type, next_object, @selections_step.query)
+                  object_type = @runner.resolve_type(@static_type, next_object, query)
                   @runner.runtime_type_at[result] = object_type
                 end
                 next_objects_by_type[object_type] << next_object
@@ -615,6 +617,7 @@ module GraphQL
               end
 
               next_objects_by_type.each do |obj_type, next_objects|
+                query.current_trace.objects(obj_type, next_objects, ctx)
                 @runner.add_step(SelectionsStep.new(
                   path: path,
                   parent_type: obj_type,
@@ -622,10 +625,11 @@ module GraphQL
                   objects: next_objects,
                   results: next_results_by_type[obj_type],
                   runner: @runner,
-                  query: @selections_step.query,
+                  query: query,
                 ))
               end
             else
+              query.current_trace.objects(@static_type, @all_next_objects, ctx)
               @runner.add_step(SelectionsStep.new(
                 path: path,
                 parent_type: @static_type,
@@ -633,7 +637,7 @@ module GraphQL
                 objects: @all_next_objects,
                 results: @all_next_results,
                 runner: @runner,
-                query: @selections_step.query,
+                query: query,
               ))
             end
           end
