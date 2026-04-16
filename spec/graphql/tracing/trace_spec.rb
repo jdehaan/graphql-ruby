@@ -12,8 +12,13 @@ describe GraphQL::Tracing::Trace do
 
   describe "object hooks" do
     class ObjectHooksSchema < GraphQL::Schema
-      class Thing < GraphQL::Schema::Object
+      module Node
+        include GraphQL::Schema::Interface
         field :name, String
+      end
+
+      class Thing < GraphQL::Schema::Object
+        implements Node
       end
 
       class Query < GraphQL::Schema::Object
@@ -37,6 +42,14 @@ describe GraphQL::Tracing::Trace do
 
         def self.thing_name(context, thing:)
           thing.name
+        end
+
+        field :node, Node, resolve_static: true do
+          argument :id, ID, loads: Node, as: :node
+        end
+
+        def self.node(context, node:)
+          node
         end
       end
 
@@ -80,6 +93,14 @@ describe GraphQL::Tracing::Trace do
       res = ObjectHooksSchema.execute_next("{ thingName(thingId: \"77\") }")
       assert_equal "Thing #77", res["data"]["thingName"]
       assert_equal ["1 objects as Query", "Query.thingName.thingId loaded OpenStruct"], res.context[:log]
+
+      res = ObjectHooksSchema.execute_next("{ node(id: \"33\") { name } }")
+      assert_equal "Thing #33", res["data"]["node"]["name"]
+      assert_equal ["1 objects as Query", "Query.node.id loaded OpenStruct", "1 objects as Thing"], res.context[:log]
+
+      partial_res = res.query.run_partials([{ path: ["node"], object: OpenStruct.new(name: "Injected thing"), context: { log: [] } }])
+      assert_equal "Injected thing", partial_res[0]["data"]["name"]
+      assert_equal ["1 objects as Thing"], partial_res[0].context[:log]
     end
   end
 end

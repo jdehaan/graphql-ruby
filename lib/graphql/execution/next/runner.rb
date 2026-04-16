@@ -260,7 +260,6 @@ module GraphQL
             end
 
             results << { "data" => data }
-
             objects = [root_value]
             query.current_trace.objects(root_type, objects, query.context)
 
@@ -316,6 +315,8 @@ module GraphQL
             if resolves_lazies
               resolved_type = schema.sync_lazy(resolved_type)
             end
+            objects = [root_value]
+            query.current_trace.objects(resolved_type, objects, query.context)
             runtime_type_at[data] = resolved_type
             results << { "data" => data }
             isolated_steps[0] << SelectionsStep.new(
