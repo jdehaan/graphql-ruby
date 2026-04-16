@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 require "graphql/execution/next/prepare_object_step"
 require "graphql/execution/next/field_resolve_step"
+require "graphql/execution/next/finalize"
 require "graphql/execution/next/load_argument_step"
 require "graphql/execution/next/runner"
 require "graphql/execution/next/selections_step"
@@ -66,6 +67,22 @@ module GraphQL
         multiplex = Execution::Multiplex.new(schema: schema, queries: queries, context: context, max_complexity: max_complexity)
         runner = Runner.new(multiplex, **schema.execution_next_options)
         runner.execute
+      end
+
+      module Finalizer
+        attr_accessor :path
+        def finalize_graphql_result(query, result_data, result_key)
+          raise RequiredImplementationMissingError
+        end
+      end
+
+      module HaltExecution
+      end
+
+      module PostProcessor
+        def after_resolve(field_results)
+          raise RequiredImplementationMissingError, "#{self.class}#after_resolve should handle `field_results` and return a new value to use"
+        end
       end
     end
   end

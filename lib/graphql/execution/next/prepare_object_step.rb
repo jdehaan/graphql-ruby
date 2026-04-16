@@ -3,8 +3,7 @@ module GraphQL
   module Execution
     module Next
       class PrepareObjectStep
-        def initialize(static_type:, object:, runner:, graphql_result:, key:, is_non_null:, field_resolve_step:, next_objects:, next_results:, is_from_array:)
-          @static_type = static_type
+        def initialize(object:, runner:, graphql_result:, key:, is_non_null:, field_resolve_step:, next_objects:, next_results:, is_from_array:)
           @object = object
           @runner = runner
           @field_resolve_step = field_resolve_step
@@ -28,9 +27,10 @@ module GraphQL
             query.current_trace.end_authorized(@resolved_type, @object, query.context, @authorized_value)
           elsif @resolved_type
             ctx = @field_resolve_step.selections_step.query.context
-            ctx.query.current_trace.begin_resolve_type(@static_type, @object, ctx)
+            st = @field_resolve_step.static_type
+            ctx.query.current_trace.begin_resolve_type(st, @object, ctx)
             @resolved_type, _ignored_value = @field_resolve_step.sync(@resolved_type)
-            ctx.query.current_trace.end_resolve_type(@static_type, @object, ctx, @resolved_type)
+            ctx.query.current_trace.end_resolve_type(st, @object, ctx, @resolved_type)
           end
           @runner.add_step(self)
         end
@@ -38,13 +38,14 @@ module GraphQL
         def call
           case @next_step
           when :resolve_type
-            if @static_type.kind.abstract?
+            static_type = @field_resolve_step.static_type
+            if static_type.kind.abstract?
               ctx = @field_resolve_step.selections_step.query.context
-              ctx.query.current_trace.begin_resolve_type(@static_type, @object, ctx)
-              @resolved_type, _ignored_value = @runner.schema.resolve_type(@static_type, @object, ctx)
-              ctx.query.current_trace.end_resolve_type(@static_type, @object, ctx, @resolved_type)
+              ctx.query.current_trace.begin_resolve_type(static_type, @object, ctx)
+              @resolved_type, _ignored_value = @runner.schema.resolve_type(static_type, @object, ctx)
+              ctx.query.current_trace.end_resolve_type(static_type, @object, ctx, @resolved_type)
             else
-              @resolved_type = @static_type
+              @resolved_type = static_type
             end
             if @runner.resolves_lazies && @runner.lazy?(@resolved_type)
               @next_step = :authorize
@@ -103,7 +104,7 @@ module GraphQL
               else
                 @graphql_result[@key] = @field_resolve_step.add_graphql_error(@authorization_error)
               end
-            rescue GraphQL::Error => err
+            rescue GraphQL::RuntimeError => err
               if @is_non_null
                 @graphql_result[@key] = @field_resolve_step.add_non_null_error(@is_from_array)
               else
@@ -118,7 +119,7 @@ module GraphQL
             @next_objects << @object
             @graphql_result[@key] = next_result_h
             @runner.runtime_type_at[next_result_h] = @resolved_type
-            @runner.static_type_at[next_result_h] = @static_type
+            @runner.static_type_at[next_result_h] = @field_resolve_step.static_type
           end
 
           @field_resolve_step.authorized_finished(self)

@@ -195,9 +195,23 @@ This is not supported because the new runtime doesn't actually produce `current_
 
 It is theoretically possible to support this but it will be a ton of work. If you use this for core runtime functions, please share your use case in a GitHub issue and we can investigate future options.
 
+### Scoped context ❌
+
+This is currently implemented with `current_path`. Another implementation is probably possible but not implemented yet. Please open an issue to discuss.
+
 ### `@defer` and `@stream` ❌
 
-This depends on `current_path` so isn't possible yet.
+`@defer` is supported with an implementation difference that _probably_ doesn't affect your application: previously, `@defer` worked by pausing and resuming the _same `GraphQL::Query` instance_. However, with `Execution::Next`, `@defer` takes a different approach. Instead, when a `GraphQL::Query` encounters `@defer`, it notes the location in the document and stops executing that branch. Later, when you request the deferred result, that branch of the query is resumed using a new instance of `GraphQL::Query::Partial`.
+
+This might matter if you're modifying `context` at runtime because those new instances _also_ have fresh `Query::Context` instances. The original query context _will_ get copied into the `@defer` branches using `Query::Context.new(**original_query.context.to_h)`, so any custom values will be available. But if you _assign new keys_ after the context is copied, those keys won't appear when running later `@defer`ed branches.
+
+To handle this, you can refactor how you accumulate data during execution. Instead of `||=`'ing into `context[...]` during execution, assign a new accumulator object _before_ starting the query, then call methods on that object to make any necessary state changes. That new object _will_ be copied into `@defer` partials, and since the object is shared between the different branches, any necessary state changes will still be "seen" everywhere.
+
+If this gives you trouble, please feel free to email me or open an issue on GitHub to discuss a migration strategy.
+
+##### GraphQL-Batch support
+
+When using `Execution::Next`, no custom code is required to support `graphql-batch`.
 
 ### ObjectCache ❌
 
@@ -242,12 +256,13 @@ Resolver classes are called.
 
 ### `raw_value` 🟡
 
-Supported but requires a manual opt-in at schema level. Support for this will probably get better somehow in a future version.
+Supported, but the `raw_value` call must be made on `context`, for example:
 
 ```ruby
-class MyAppSchema < GraphQL::Schema
-  uses_raw_value(true) # TODO This configuration will be improved in a future GraphQL-Ruby version
-  use GraphQL::Execution::Next
+field :values, SomeObjectType, resolve_static: true
+
+def self.values(context)
+  context.raw_value(...)
 end
 ```
 

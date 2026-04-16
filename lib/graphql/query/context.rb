@@ -126,6 +126,12 @@ module GraphQL
         nil
       end
 
+      # @param value [Object] Any object to be inserted directly into the final response
+      # @return [GraphQL::Execution::Interpreter::RawValue] Return this from the field
+      def raw_value(value)
+        GraphQL::Execution::Interpreter::RawValue.new(value)
+      end
+
       # @example Print the GraphQL backtrace during field resolution
       #   puts ctx.backtrace
       #

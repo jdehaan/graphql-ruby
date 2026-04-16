@@ -45,10 +45,12 @@ module GraphQL
         private
 
         def assign_value
-          if @loaded_value.is_a?(GraphQL::Error)
+          if @loaded_value.is_a?(GraphQL::RuntimeError)
             @loaded_value.path = @field_resolve_step.path
             @field_resolve_step.arguments = @loaded_value
           else
+            query = @field_resolve_step.selections_step.query
+            query.current_trace.object_loaded(@argument_definition, @loaded_value, query.context)
             @arguments[@argument_key] = @loaded_value
           end
 
