@@ -31,7 +31,7 @@ module GraphQL
         end
       end
 
-      def after_resolve(values: nil, value: nil, context:, object:, arguments:, **rest)
+      def after_resolve(values: nil, value: nil, context:, objects: nil, object: nil, arguments:, **rest)
         if values
           values.map do |value|
             self.class.write_subscription(@field, value, arguments, context)
