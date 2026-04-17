@@ -929,7 +929,7 @@ ERR
       def run_next_extensions_before_resolve(objs, args, ctx, extended, idx: 0, &block)
         extension = @extensions[idx]
         if extension
-          extension.resolve_next(objects: objs, arguments: args, context: ctx) do |extended_objs, extended_args, memo|
+          extension.resolve(objects: objs, arguments: args, context: ctx) do |extended_objs, extended_args, memo|
             if memo
               memos = extended.memos ||= {}
               memos[idx] = memo

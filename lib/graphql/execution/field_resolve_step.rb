@@ -491,7 +491,7 @@ module GraphQL
             end
           else
             memo = memos[@finish_extension_idx]
-            @field_results = ext.after_resolve_next(objects: @extended.object, arguments: @extended.arguments, context: ctx, values: @field_results, memo: memo) # rubocop:disable Development/ContextIsPassedCop
+            @field_results = ext.after_resolve(objects: @extended.object, arguments: @extended.arguments, context: ctx, values: @field_results, memo: memo) # rubocop:disable Development/ContextIsPassedCop
           end
           @finish_extension_idx += 1
           if any_lazy_results?
