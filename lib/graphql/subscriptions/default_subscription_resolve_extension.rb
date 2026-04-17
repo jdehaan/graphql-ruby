@@ -18,7 +18,7 @@ module GraphQL
       end
 
       def resolve_next(context:, objects:, arguments:)
-        has_override_implementation = @field.execution_next_mode != :direct_send
+        has_override_implementation = @field.execution_mode != :direct_send
 
         if !has_override_implementation
           if context.query.subscription_update?

@@ -718,31 +718,31 @@ module GraphQL
 
         def resolve_batch(objects, context, args_hash)
           method_receiver = @field_definition.dynamic_introspection ? @field_definition.owner : @parent_type
-          case @field_definition.execution_next_mode
+          case @field_definition.execution_mode
           when :resolve_batch
             begin
-              method_receiver.public_send(@field_definition.execution_next_mode_key, objects, context, **args_hash)
+              method_receiver.public_send(@field_definition.execution_mode_key, objects, context, **args_hash)
             rescue GraphQL::ExecutionError => exec_err
               Array.new(objects.size, exec_err)
             end
           when :resolve_static
             result = begin
-              method_receiver.public_send(@field_definition.execution_next_mode_key, context, **args_hash)
+              method_receiver.public_send(@field_definition.execution_mode_key, context, **args_hash)
             rescue GraphQL::ExecutionError => err
               err
             end
             Array.new(objects.size, result)
           when :resolve_each
             objects.map do |o|
-              method_receiver.public_send(@field_definition.execution_next_mode_key, o, context, **args_hash)
+              method_receiver.public_send(@field_definition.execution_mode_key, o, context, **args_hash)
             rescue GraphQL::ExecutionError => err
               err
             end
           when :hash_key
-            k = @field_definition.execution_next_mode_key
+            k = @field_definition.execution_mode_key
             objects.map { |o| o[k] }
           when :direct_send
-            m = @field_definition.execution_next_mode_key
+            m = @field_definition.execution_mode_key
             objects.map do |o|
               o.public_send(m, **args_hash)
             rescue GraphQL::ExecutionError => err
@@ -755,9 +755,9 @@ module GraphQL
               end
             end
           when :dig
-            objects.map { |o| o.dig(*@field_definition.execution_next_mode_key) }
+            objects.map { |o| o.dig(*@field_definition.execution_mode_key) }
           when :dataload
-            if (k = @field_definition.execution_next_mode_key).is_a?(Class)
+            if (k = @field_definition.execution_mode_key).is_a?(Class)
               context.dataload_all(k, objects)
             elsif (source_class = k[:with])
               if (batch_args = k[:by])
@@ -796,12 +796,12 @@ module GraphQL
               if @field_definition.dynamic_introspection
                 obj_inst = @owner.wrap(obj_inst, context)
               end
-              obj_inst.public_send(@field_definition.execution_next_mode_key, **args_hash)
+              obj_inst.public_send(@field_definition.execution_mode_key, **args_hash)
             rescue GraphQL::ExecutionError => exec_err
               exec_err
             end
           else
-            raise "Batching execution for #{path} not implemented (execution_next_mode: #{@execution_next_mode.inspect}); provide `resolve_static:`, `resolve_batch:`, `hash_key:`, `method:`, or use a compatibility plug-in"
+            raise "Batching execution for #{path} not implemented (execution_mode: #{@execution_mode.inspect}); provide `resolve_static:`, `resolve_batch:`, `hash_key:`, `method:`, or use a compatibility plug-in"
           end
         end
       end
